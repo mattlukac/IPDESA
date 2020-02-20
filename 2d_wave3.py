@@ -64,7 +64,7 @@ delta = PointSource(V, Point(1.5,1.5), 1)
 delta.apply(b)
 
 # Create VTK file for saving solution
-vtkfile = File('wave3/solution.pvd')
+vtkfile = File('solutions/2d_wave3/solution.pvd')
 
 # Time-stepping
 u = Function(V)

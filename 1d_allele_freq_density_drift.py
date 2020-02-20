@@ -41,7 +41,7 @@ a = u*v*dx + dt/(4*N) * grad(xx*u)[0]*grad(v)[0]*dx
 L = u_n*v*dx
 
 # Create VTK file for saving solution
-vtkfile = File('allele_freq_density/solution.pvd')
+vtkfile = File('solutions/1d_allele_freq_density_drift/solution.pvd')
 
 # Time-stepping
 u = Function(V)

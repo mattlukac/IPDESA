@@ -60,7 +60,7 @@ a = u*v*dx + dt**2 * C**2 * inner(grad(u), grad(v))*dx
 L = Constant(2.0)*u_n1*v*dx - u_n0*v*dx + dt**2 * f*v*dx
 
 # Create VTK file for saving solution
-vtkfile = File('wave2/solution.pvd')
+vtkfile = File('solutions/2d_wave2/solution.pvd')
 
 # Time-stepping
 u = Function(V)
