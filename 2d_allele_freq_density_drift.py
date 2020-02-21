@@ -25,8 +25,8 @@ V = FunctionSpace(mesh, 'P', 1)
 def boundary(x, on_boundary):
     return on_boundary
 
-bc = DirichletBC(V, Constant(0.0), boundary)
-#bc = []    # no boundary condition
+#bc = DirichletBC(V, Constant(0.0), boundary)
+bc = []    # no boundary condition
 
 # Define initial value of Gaussian with low variance
 u_0 = Expression('s1*s2*exp(-(pow(s1*(x[0]-p1), 2) + pow(s2*(x[1]-p2), 2)))/pi', 
@@ -54,8 +54,12 @@ for _ in range(num_steps):
     # Update current time
     t += dt
     
-    # Compute solution and integrate to 1
+    # Compute solution, set >0, and integrate to 1
     solve(a == L, u, bc)
+    u_array = u.vector().get_local()
+    u_array[u_array < 0] = 0.0
+    #u_array /= np.max(u_array)
+    u.vector().set_local(u_array)
     u.vector()[:] = n1*n2*u.vector()[:] / np.sum(u.vector()[:])
 
     # Save to file and plot solution
