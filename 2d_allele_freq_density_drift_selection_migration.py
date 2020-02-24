@@ -12,8 +12,8 @@ nu1, nu2 = N1/Nref, N2/Nref         # relative effective population size
 epsilon = 0.0       # distance from 0 and 1
 p1, p2 = 0.5, 0.5   # initial x and y frequencies
 s1, s2 = 50, 100    # 1/(root(2)sigma_x) and 1/(root(2)sigma_y)
-g1, g2 = 0.05, 0.01   # 2Ns for each population
-m12, m21 = 0.8, 0.5   # migration rates 
+#g1, g2 = 0.05, 0.01   # 2Ns for each population
+#m12, m21 = 0.8, 0.5   # migration rates 
 
 # Create mesh and define function space
 n1, n2 = 50, 50
@@ -41,10 +41,15 @@ u = TrialFunction(V)
 v = TestFunction(V)
 drift = Expression(('x[0]*(1-x[0])/N1', 'x[1]*(1-x[1])/N2'),
           N1=N1, N2=N2, degree = 2, domain=mesh)
-sel = Expression(('g1*x[0]*(1-x[0])', 'g2*x[1]*(1-x[1])'),
-        g1=g1, g2=g2, degree = 2, domain=mesh)
-mig = Expression(('m12*(x[1]-x[0])', 'm21*(x[0]-x[1])'),
-        m12=m12, m21=m21, degree = 2, domain=mesh)
+# Selection term with time dependent 2Ns
+sel = Expression(('(0.08*cos(0.1*t))*x[0]*(1-x[0])',
+    '(0.008*cos(0.05*t))*x[1]*(1-x[1])'),
+    t=0, degree = 2, domain=mesh)
+
+# Migration rates with time dependence
+mig = Expression(('(0.8 + 0.3*sin(0.1*t))*(x[1]-x[0])', 
+    '(0.5 + 0.2*sin(0.2*t))*(x[0]-x[1])'),
+    t=0, degree = 2, domain=mesh)
 
 a = u*v*dx + dt/4 * inner(diag_vector(grad(drift*u)), grad(v))*dx - dt*u*inner(sel+mig, grad(v))*dx #- dt*u*inner(mig, grad(v))*dx 
 L = u_n*v*dx
@@ -59,6 +64,8 @@ for _ in range(num_steps):
     
     # Update current time
     t += dt
+    sel.t = t
+    mig.t = t
     
     # Compute solution and integrate to 1
     solve(a == L, u, bc)
