@@ -2,3 +2,4 @@ fenics_tutorials
 test*
 wave
 solutions
+*.DS_Store
