@@ -1,11 +1,12 @@
 from fenics import *
 import numpy as np
 
-T = 80.0	        # final time
-num_steps = 80 	# number of time steps
+T = 60.0	        # final time
+num_steps = 120 	# number of time steps
 dt = T / num_steps	# time step size
 Nref = 100              # reference effective population size
 N = 20                  # effective population size
+g = -0.01               # selection coefficient 2Ns
 nu = N/Nref             # relative effective population size
 epsilon = 0.0           # distance from 0 and 1
 p = 0.5                 # initial frequency
@@ -28,16 +29,20 @@ u_0 = Expression('100*exp(-pow(100*(x[0]-p),2))/sqrt(pi)',
 #u_n = interpolate(u_D, V)
 u_n = project(u_0, V)
 
+
 # Define variational problem
 u = TrialFunction(V)
 v = TestFunction(V)
 xx = Expression('x[0]*(1-x[0])', degree = 2, domain=mesh)
 
-a = u*v*dx + dt/(4*N) * grad(xx*u)[0]*grad(v)[0]*dx
+# Selection term with time dependent 2Ns
+sel = Expression('g*x[0]*(1-x[0])', g=g, degree=2, domain=mesh)
+
+a = u*v*dx + dt/(4*N) * grad(xx*u)[0]*grad(v)[0]*dx - dt*u*sel*v.dx*dx
 L = u_n*v*dx
 
 # Create VTK file for saving solution
-vtkfile = File('solutions/1d_allele_freq_density_drift/solution.pvd')
+vtkfile = File('solutions/1d_allele_freq_density_drift_selection/solution.pvd')
 
 # Time-stepping
 u = Function(V)

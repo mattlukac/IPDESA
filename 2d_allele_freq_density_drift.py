@@ -3,15 +3,15 @@ from ufl import diag_vector
 import numpy as np
 import sympy as sym
 
-T = 50.0	    # final time
+T = 100.0	    # final time
 num_steps = 100     # number of time steps
 dt = T / num_steps  # time step size
-N1, N2 = 20, 10     # effective population size for pop 1 and 2
+N1, N2 = 50, 5     # effective population size for pop 1 and 2
 Nref = 100          # reference effective population size
 nu1, nu2 = N1/Nref, N2/Nref         # relative effective population size
 epsilon = 0.0       # distance from 0 and 1
 p1, p2 = 0.5, 0.5   # initial x and y frequencies
-s1, s2 = 50, 100   # 1/(root(2)sigma_x) and 1/(root(2)sigma_y)
+s1, s2 = 100, 100   # 1/(root(2)sigma_x) and 1/(root(2)sigma_y)
 
 # Create mesh and define function space
 n1, n2 = 50, 50
@@ -25,8 +25,8 @@ V = FunctionSpace(mesh, 'P', 1)
 def boundary(x, on_boundary):
     return on_boundary
 
-#bc = DirichletBC(V, Constant(0.0), boundary)
-bc = []    # no boundary condition
+bc = DirichletBC(V, Constant(0.0), boundary)
+#bc = []    # no boundary condition
 
 # Define initial value of Gaussian with low variance
 u_0 = Expression('s1*s2*exp(-(pow(s1*(x[0]-p1), 2) + pow(s2*(x[1]-p2), 2)))/pi', 
