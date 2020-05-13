@@ -3,3 +3,4 @@ test*
 wave
 solutions
 *.DS_Store
+autoencoder/logs
