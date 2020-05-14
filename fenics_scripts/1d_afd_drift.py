@@ -1,6 +1,7 @@
 from fenics import *
 import numpy as np
 
+
 T = 80.0	        # final time
 num_steps = 80 	# number of time steps
 dt = T / num_steps	# time step size

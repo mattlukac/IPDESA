@@ -1,17 +1,12 @@
 ## generates training and test data and labels
-## for the basic ff network to infer diffusion 
-## coefficients D in the one-dimension equation
-## \grad\dot( D\grad u ) + f = 0 where
-## f(x) = D\sin(\pi D x), thus
-## u(x) = \sin(\pi D x)/(\pi D)^2 on \Omega = [-5, 5]
-## and D ~ Uniform(0.1, 1) with free boundary conditions
-
+## for the basic ff network to infer gaussian variance
+## D in u(x) = 1/sqrt(2pi D) exp(-x^2/(2D))
 
 import numpy as np 
 
 # training, validation, test set sizes
 sets = ['train','val','test']
-N = dict(zip(sets, [900,100,1000]))
+N = dict(zip(sets, [900,300,1000]))
 
 # sampled points in the domain
 x = np.linspace(-1., 1., num=200)

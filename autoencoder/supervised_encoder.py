@@ -1,4 +1,4 @@
-from sae.encoder import *
+from sae.supervised_encoder import *
 
 
 ## LOAD DATA
@@ -13,8 +13,9 @@ lr_callback = learning_rate_callback()
 
 ## DEFINE MODEL PARAMETERS
 design = {'flavor':'ff',
-          'denseUnits':(100, 80, 60, 30, 1),
-          'denseActivations':('sigmoid','sigmoid','sigmoid','sigmoid','sigmoid')
+          'inputShape':u_train[0,:].shape,
+          'denseUnits':(70, 30, 1),
+          'denseActivations':('relu','sigmoid','sigmoid')
          }
 assert len(design['denseUnits']) == len(design['denseActivations'])
 

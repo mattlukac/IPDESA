@@ -13,11 +13,17 @@ class Encoder(Sequential):
     def __init__(self, params):
         super(Encoder, self).__init__()
         self.flavor = params['flavor']
-        self.numLayers = len(params['denseUnits'])
+        numLayers = len(params['denseUnits'])
+        in_shape = params['inputShape']
         if self.flavor == 'ff':
-            for l in range(self.numLayers):
-                self.add(Dense(units = params['denseUnits'][l],
-                               activation = params['denseActivations'][l]))
+            units = params['denseUnits']
+            activs = params['denseActivations']
+            # construct network
+            self.add(Dense(units=units[0], 
+                           activation=activs[0], 
+                           input_shape=in_shape))
+            for l in range(1, numLayers):
+                self.add(Dense(units[l], activs[l]))
 
 
 ## CALLBACKS
@@ -33,13 +39,13 @@ def learning_rate_callback():
         if epoch < 100:
             return 0.001
         elif epoch < 200:
-            return 0.0005
-        elif epoch < 300:
             return 0.0001
+        elif epoch < 300:
+            return 0.00005
         elif epoch < 400:
-            return 0.00001
+            return 0.00005
         else:
-            return 0.000001
+            return 0.00005
     lr_callback = LearningRateScheduler(lr_sched)
     return lr_callback
 
@@ -52,7 +58,6 @@ def load_data(DIR, dclass):
 ## TRAIN MODEL
 def train_model(model, training):
     model.compile(optimizer = training['optimizer'], loss = training['loss'])
-    model.build(input_shape = training['x'].shape)
     model.summary()
     model.fit(x=training['x'], y=training['y'], 
               validation_data = training['val_dat'], 
