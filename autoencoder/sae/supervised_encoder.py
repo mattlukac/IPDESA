@@ -35,6 +35,12 @@ def tensorboard_callback():
 
 # lr scheduler callback
 def learning_rate_callback():
+    """
+    Defines a piecewise constant function to decrease
+    the learning rate as training progresses.
+    This is done to fine-tune the gradient descent
+    so the optimizer doesn't hop over relative minimums.
+    """
     def lr_sched(epoch):
         if epoch < 100:
             return 0.001
@@ -51,12 +57,25 @@ def learning_rate_callback():
 
 ## LOAD DATA
 def load_data(DIR, dclass):
+    """
+    Loads the (data, targets) and returns both.
+    The solution function file must be named u_*
+    and the latent parameters must be named Theta_*
+    """
     u_ = np.load(DIR+'u_'+dclass+'.npy')
-    D_ = np.load(DIR+'D_'+dclass+'.npy')
-    return u_, D_
+    Theta_ = np.load(DIR+'Theta_'+dclass+'.npy')
+    return u_, Theta_
 
 ## TRAIN MODEL
 def train_model(model, training):
+    """
+    Compiles the model using the optimizer and loss function
+    specified in the training dictionary.
+    Then print a summary of the model.
+    Finally, fits the model using training data, validation data,
+    batch_size, epochs, and callbacks 
+    specified in the training dictionary.
+    """
     model.compile(optimizer = training['optimizer'], loss = training['loss'])
     model.summary()
     model.fit(x=training['x'], y=training['y'], 
@@ -67,12 +86,18 @@ def train_model(model, training):
 
 ## CALCULATE RELATIVE ERRORS
 def print_relative_errors(model, test_dat):
-    D_predict = np.squeeze(model.predict(test_dat[0]))
-    relError = np.abs(test_dat[1] - D_predict)/test_dat[1]
+    """
+    Trained model is used to predict on test data tuple,
+    then computes the relative error (RE) to print the 
+    maximum, minimum, mean RE, as well as 
+    the true and predicted Theta values associated with the max RE.
+    """
+    Theta_predict = np.squeeze(model.predict(test_dat[0]))
+    relError = np.abs(test_dat[1] - Theta_predict)/test_dat[1]
     relErrMax = np.argmax(relError)
     print('max relative error:', np.max(relError))
     print('min relative error:', np.min(relError))
     print('mean relative error:', np.mean(relError))
-    print('max relative error test and predicted D:', 
+    print('max relative error test and predicted Theta:', 
           test_dat[1][relErrMax], 
-          D_predict[relErrMax]) 
+          Theta_predict[relErrMax]) 
