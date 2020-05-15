@@ -4,3 +4,4 @@ wave
 solutions
 *.DS_Store
 autoencoder/logs
+!autoencoder/training_data/*/generate_data.py
