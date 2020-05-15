@@ -1,11 +1,15 @@
 from sae.supervised_encoder import *
+import argparse
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--data_dir', help='directory to the training data')
+args = parser.parse_args()
 
 ## LOAD DATA
-DIR = 'training_data/gaussian_family/'
-u_train, D_train = load_data(DIR, 'train')
-u_val, D_val = load_data(DIR, 'val')
-u_test, D_test = load_data(DIR, 'test')
+DIR = args.data_dir
+u_train, Theta_train = load_data(DIR, 'train')
+u_val, Theta_val = load_data(DIR, 'val')
+u_test, Theta_test = load_data(DIR, 'test')
 
 ## LOAD CALLBACKS
 tb_callback = tensorboard_callback()
@@ -25,9 +29,9 @@ training = {'optimizer':'adam',
             'batch_size':15, 
             'epochs':500,
             'x':u_train,
-            'y':D_train,
-            'val_dat':(u_val, D_val),
-            'test_dat':(u_test, D_test)
+            'y':Theta_train,
+            'val_dat':(u_val, Theta_val),
+            'test_dat':(u_test, Theta_test)
            }
 
 
