@@ -1,7 +1,6 @@
-fenics_tutorials
-test*
-wave
-solutions
 *.DS_Store
+fenics_tutorials
+fenics_scripts/solutions
+test*
 autoencoder/logs
 autoencoder/training_data/*/*.npy
