@@ -3,4 +3,4 @@ fenics_tutorials
 fenics_scripts/solutions
 test*
 autoencoder/logs
-autoencoder/training_data/*/*.npy
+autoencoder/training_data/*/*.pkl
