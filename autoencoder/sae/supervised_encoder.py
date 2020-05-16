@@ -5,6 +5,7 @@ from tensorflow.keras.callbacks import TensorBoard, LearningRateScheduler
 from tensorflow.keras import Sequential
 import numpy as np
 import datetime
+import pickle
 
 ## Encoder class
 class Encoder(Sequential):
@@ -56,15 +57,17 @@ def learning_rate_callback():
     return lr_callback
 
 ## LOAD DATA
-def load_data(DIR, dclass):
+def load_data(dirName):
     """
-    Loads the (data, targets) and returns both.
-    The solution function file must be named u_*
-    and the latent parameters must be named Theta_*
+    Loads the (data, targets), both are dictionaries
+    with keys 'train', 'val', 'test'.
+    The input dirName is simply the name of the 
+    directory containing the pickled training data.
     """
-    u_ = np.load(DIR+'u_'+dclass+'.npy')
-    Theta_ = np.load(DIR+'Theta_'+dclass+'.npy')
-    return u_, Theta_
+    thePickle = open(dirName + '/data.pkl', 'rb')
+    theData = pickle.load(thePickle)
+    thePickle.close()
+    return theData
 
 ## TRAIN MODEL
 def train_model(model, training):
@@ -92,12 +95,23 @@ def print_relative_errors(model, test_dat):
     maximum, minimum, mean RE, as well as 
     the true and predicted Theta values associated with the max RE.
     """
-    Theta_predict = np.squeeze(model.predict(test_dat[0]))
-    relError = np.abs(test_dat[1] - Theta_predict)/test_dat[1]
-    relErrMax = np.argmax(relError)
-    print('max relative error:', np.max(relError))
-    print('min relative error:', np.min(relError))
-    print('mean relative error:', np.mean(relError))
-    print('max relative error test and predicted Theta:', 
-          test_dat[1][relErrMax], 
-          Theta_predict[relErrMax]) 
+    Theta_predict = model.predict(test_dat[0])
+    # two cases: Theta is one dimensional or more
+    if Theta_predict.shape[1] == 1:
+        Theta_predict = np.squeeze(Theta_predict)
+        relError = np.abs(test_dat[1] - Theta_predict)/test_dat[1]
+        relErrMax = np.argmax(relError)
+    else:
+        relError = np.abs((test_dat[1] - Theta_predict)/test_dat[1])
+        totalRelError = np.sum(relError, axis=0)
+        relErrMax = np.argmax(totalRelError)
+        relErrMin = np.argmin(totalRelError)
+    print('max relative error:', np.max(relError[relErrMax, :]))
+    print('min relative error:', np.min(relError[relErrMin, :]))
+    print('mean relative error:', np.mean(relError, axis=0))
+    print('max relative error true and predicted Theta:', 
+            test_dat[1][relErrMax, :], 
+            Theta_predict[relErrMax, :]) 
+    print('mean predicted Theta:', np.mean(Theta_predict, axis=0))
+    print('mean true Theta:', np.mean(test_dat[1], axis=0))
+    print('min predicted Theta:', np.min(Theta_predict, axis=0))
