@@ -1,50 +1,35 @@
-import supervise
+import supervise.equation as equation
+import supervise.encoder as encoder
 from os import path
 import argparse
 import importlib
 
-# get the equation type
+# get the equation name
 parser = argparse.ArgumentParser()
 parser.add_argument('--train_on', 
         help='name of directory containing the training data')
 args = parser.parse_args()
 
-problem = importlib.import_module()
-
 eqn_name = args.train_on
-eqn_path = 'data/' + eqn_name + '.pkl'
-eqn = supervise.equation.Equation(eqn_name)
 
 ## LOAD DATA
-if not path.exists(eqn_path):
-    # run generate_data.py
-    dataset = supervise.equation.Dataset(eqn_name)
-    train, val, test = dataset.load()
-
-## LOAD CALLBACKS
-tb_callback = supervised.tensorboard_callback()
-lr_callback = supervised.learning_rate_callback()
+data = equation.Dataset(eqn_name)
+data.load()
 
 ## DEFINE MODEL PARAMETERS
 design = {'flavor':'ff',
-          'inputShape':u['train'][0,:].shape,
           'denseUnits':(100, 70, 40, 10, 3),
           'denseActivations':('relu', 'relu', 'relu', 'relu', 'relu'),
           'optimizer':'adam',
           'loss':'mae',
-          'callbacks':[lr_callback, tb_callback],
+          'callbacks':['learning_rate', 'tensorboard'],
           'batch_size':15,
-          'epochs':150,
-          'data':u['train'],
-          'targets':Theta['train'],
-          'val_data':(u['val'], Theta['val']),
-          'test_data':(u['test'], Theta['test'])
+          'epochs':50,
          }
 assert len(design['denseUnits']) == len(design['denseActivations'])
 
-
 ## TRAIN MODEL
-model = supervised.Encoder(design)
+model = encoder.Encoder(design, data)
 model.train()
 
 ## PRINT DIAGNOSTICS:

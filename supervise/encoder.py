@@ -5,28 +5,30 @@ from tensorflow.keras.callbacks import TensorBoard, LearningRateScheduler
 from tensorflow.keras import Sequential
 import numpy as np
 import datetime
-import pickle
+import equation
 
 
 class Encoder(Sequential):
 
     # flavor is either 'ff' or 'cnn'
-    def __init__(self, design):
+    def __init__(self, design, Dataset):
         super(Encoder, self).__init__()
 
         # attributes defined in design dictionary
         self.flavor = design['flavor']
-        self.in_shape = design['inputShape']
-        self.numLayers = len(design['denseUnits'])
+        self.num_layers = len(design['denseUnits'])
         self.optimizer = design['optimizer']
         self.loss = design['loss']
         self.callbacks = design['callbacks']
         self.batch_size = design['batch_size']
-        self.epocs = design['epochs']
-        self.data = design['data']
-        self.targets = design['targets']
-        self.val_data = design['val_data']
-        self.test_data = design['test_data']
+        self.epochs = design['epochs']
+
+        # attributes from Dataset class
+        self.input = Dataset.train[0]
+        self.input_shape = self.input.shape 
+        self.targets = Dataset.train[1]
+        self.val_data = Dataset.validate 
+        self.test_data = Dataset.test
 
         # feed forward network
         if self.flavor == 'ff':
@@ -35,11 +37,11 @@ class Encoder(Sequential):
             # construct network
             self.add(Dense(units=units[0],
                            activation=activs[0],
-                           input_shape=self.in_shape))
-            for layer in range(1, self.numLayers):
+                           input_shape=self.input_shape))
+            for layer in range(1, self.num_layers):
                 self.add(Dense(units[layer], activs[layer]))
 
-    # methods
+    ## TRAIN THE MODEL
     def train(self):
         """
         Compiles the model, prints a summary, fits to data
@@ -47,22 +49,36 @@ class Encoder(Sequential):
         model.compile(optimizer = self.optimizer,
                       loss = self.loss)
         model.summary()
-        model.fit(x=self.data, y=self.targets,
+
+        # make callbacks and fit model
+        callbacks = get_callbacks()
+
+        model.fit(x=self.input, y=self.targets,
                   validation_data = self.val_dat,
                   batch_size = self.batch_size,
                   epochs = self.epochs,
                   callbacks = self.callbacks)
 
+    def get_callbacks(self):
+        callbacks = []
+        for cb in self.callbacks:
+            if cb == 'tensorboard':
+                callbacks.append(tensorboard_callback())
+            if cb == 'learning_rate':
+                callbacks.append(learning_rate_callback())
+        return callbacks
+
     ## CALCULATE RELATIVE ERRORS
-    def print__errors(self):
+    def print_errors(self):
         """
         Trained model is used to predict on test data,
         then computes the relative error (RE) to print
         statistics derived from RE.
         """
-        test_data = self.test_data[0]
+        test_input = self.test_data[0]
         test_targets = self.test_data[1]
-        Theta_predict = model.predict(test_data)
+        Theta_predict = model.predict(test_input)
+        
         # two cases: Theta is one dimensional or more
         if Theta_predict.shape[1] == 1:
             Theta_predict = np.squeeze(Theta_predict)

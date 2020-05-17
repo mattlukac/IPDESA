@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pickle
 import importlib
+from os import path
 
 
 class Equation:
@@ -50,6 +51,16 @@ class Dataset:
         Returns (train, val, test) 3-tuple of (data, targets) tuples
         """
         assert sum(ratios) == 1.0
+
+        # check pickled data exists; if not, simulate it
+        if not path.exists('data/' + self.eqn.name + '.pkl'):
+            replicates = 2000
+            self.eqn.simulate(replicates)
+            print('Training data did not exist.')
+            print('Simulated with {rep} replicates'.format(rep=replicates))
+            print('To change the number of replicates, \
+                use Equation.simulate(replicates)')
+
         thePickle = open('data/' + self.eqn.name + '.pkl', 'rb')
         theData = pickle.load(thePickle)
         thePickle.close()
