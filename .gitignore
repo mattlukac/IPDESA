@@ -3,4 +3,4 @@ fenics_tutorials
 fenics_scripts/solutions
 test*
 logs
-training_data/*/*.pkl
+data/*.pkl
