@@ -3,6 +3,7 @@ from os import path
 import argparse
 import importlib
 
+# get the equation type
 parser = argparse.ArgumentParser()
 parser.add_argument('--train_on', 
         help='name of directory containing the training data')
@@ -10,16 +11,15 @@ args = parser.parse_args()
 
 problem = importlib.import_module()
 
+eqn_name = args.train_on
+eqn_path = 'data/' + eqn_name + '.pkl'
+eqn = supervise.equation.Equation(eqn_name)
+
 ## LOAD DATA
-problem_path = 'data/' + args.train_on
-if not path.exists(problem + '.pkl'):
+if not path.exists(eqn_path):
     # run generate_data.py
-    supervise.data.make(problem)
-
-data = supervise.data.Dataset(problem)
-u = data.u
-Theta = data.Theta
-
+    dataset = supervise.equation.Dataset(eqn_name)
+    train, val, test = dataset.load()
 
 ## LOAD CALLBACKS
 tb_callback = supervised.tensorboard_callback()

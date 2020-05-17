@@ -1,6 +1,7 @@
 *.DS_Store
 fenics_tutorials
 fenics_scripts/solutions
-test.*
+test-*
 logs
 data/*.pkl
+slurm*

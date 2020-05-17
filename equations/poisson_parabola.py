@@ -17,7 +17,7 @@ import numpy as np
 # DOMAIN
 def domain():
     """
-    Returns the domain as an array
+    The unit interval as an array of length 100
     """
     Omega = np.linspace(0., 1., num=100)
     return Omega
