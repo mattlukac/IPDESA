@@ -5,3 +5,5 @@ test-*
 logs
 data/*
 slurm*
+equations/__pycache__
+supervise/__pycache__
