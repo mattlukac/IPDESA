@@ -11,7 +11,7 @@ from . import equation
 class Encoder(Sequential):
 
     def __init__(self, design, Dataset):
-        super(Encoder, self).__init__()
+        super().__init__()
 
         # attributes defined in design dictionary
         self.flavor = design['flavor']
@@ -108,15 +108,16 @@ class Encoder(Sequential):
         # get input and targets
         test_input = self.test_data[0]
         target_true = self.test_data[1]
-        print('true targets:\n', target_true[0:7])
+        print('training targets:\n', self.train_data[1])
+        print('min train target:', np.min(self.train_data[1]))
         norm_target_predict = self.predict(test_input)
-        print('predicted targets:\n', norm_target_predict[0:7])
 
         # check test targets have same shape as predicted targets
         assert target_true.shape == norm_target_predict.shape
 
         # invert the normalization to avoid dividing by 0
         target_predict = self.invert_normalize_targets(norm_target_predict)
+        print('predicted targets:\n', target_predict[0:7])
 
         # calculate relative error statistics
         relErr = np.abs((target_true - target_predict) / target_true)
@@ -143,7 +144,7 @@ class Encoder(Sequential):
         print('mean relative error:', np.mean(relErr, axis=0))
         print('mean true target:', np.mean(target_true, axis=0))
         print('mean predicted target:', np.mean(target_predict, axis=0))
-        print('max relative error:', np.max(relErr, axis=0))
+        print('\n max relative error (%):', 100*np.max(relErr, axis=0), '\n')
         print('max relative error true target:', target_true[maxErr])
         print('max relative error predicted target:', target_predict[maxErr])
         print('min relative error:', np.min(relErr, axis=0))

@@ -1,10 +1,13 @@
 from supervise import equation, encoder
 import argparse
+from tensorflow.random import set_seed
+
+set_seed(23)
 
 # get the equation name
 parser = argparse.ArgumentParser()
 parser.add_argument('--train_on', 
-        help='name of directory containing the training data')
+        help='name of file containing the training data')
 args = parser.parse_args()
 
 eqn_name = args.train_on
@@ -25,7 +28,7 @@ design = {'flavor':'ff',
                               (outUnits, 'relu')
                              ],
           'optimizer':'adam',
-          'loss':'mae',
+          'loss':'mse',
           'callbacks':['learning_rate', 'tensorboard'],
           'batch_size':15,
           'epochs':20,
