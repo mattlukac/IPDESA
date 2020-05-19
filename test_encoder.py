@@ -1,8 +1,5 @@
-import supervise.equation as equation
-import supervise.encoder as encoder
-from os import path
+from supervise import equation, encoder
 import argparse
-import importlib
 
 # get the equation name
 parser = argparse.ArgumentParser()
@@ -13,23 +10,29 @@ args = parser.parse_args()
 eqn_name = args.train_on
 
 ## LOAD DATA
-data = equation.Dataset(eqn_name)
-data.load()
+dataset = equation.Dataset(eqn_name)
+dataset.load()
+inUnits = dataset.train[0].shape[1]
+outUnits = dataset.train[1].shape[1]
+
 
 ## DEFINE MODEL PARAMETERS
 design = {'flavor':'ff',
-          'denseUnits':(100, 70, 40, 10, 3),
-          'denseActivations':('relu', 'relu', 'relu', 'relu', 'relu'),
+          'unit_activations':[(inUnits, 'relu'),
+                              (70, 'relu'),
+                              (40, 'relu'),
+                              (10, 'relu'),
+                              (outUnits, 'relu')
+                             ],
           'optimizer':'adam',
           'loss':'mae',
           'callbacks':['learning_rate', 'tensorboard'],
           'batch_size':15,
-          'epochs':50,
+          'epochs':20,
          }
-assert len(design['denseUnits']) == len(design['denseActivations'])
 
 ## TRAIN MODEL
-model = encoder.Encoder(design, data)
+model = encoder.Encoder(design, dataset)
 model.train()
 
 ## PRINT DIAGNOSTICS:

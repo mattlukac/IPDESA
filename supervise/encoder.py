@@ -5,18 +5,17 @@ from tensorflow.keras.callbacks import TensorBoard, LearningRateScheduler
 from tensorflow.keras import Sequential
 import numpy as np
 import datetime
-import equation
+from . import equation
 
 
 class Encoder(Sequential):
 
-    # flavor is either 'ff' or 'cnn'
     def __init__(self, design, Dataset):
         super(Encoder, self).__init__()
 
         # attributes defined in design dictionary
         self.flavor = design['flavor']
-        self.num_layers = len(design['denseUnits'])
+        self.num_layers = len(design['unit_activations'])
         self.optimizer = design['optimizer']
         self.loss = design['loss']
         self.callbacks = design['callbacks']
@@ -24,87 +23,139 @@ class Encoder(Sequential):
         self.epochs = design['epochs']
 
         # attributes from Dataset class
-        self.input = Dataset.train[0]
-        self.input_shape = self.input.shape 
-        self.targets = Dataset.train[1]
+        self.train_data = Dataset.train
         self.val_data = Dataset.validate 
         self.test_data = Dataset.test
+        self.target_min = Dataset.target_min
+        self.target_range = Dataset.target_range
 
-        # feed forward network
+        # build feed forward network
         if self.flavor == 'ff':
-            units = design['denseUnits']
-            activs = design['denseActivations']
+            unit_activ = design['unit_activations']
             # construct network
-            self.add(Dense(units=units[0],
-                           activation=activs[0],
-                           input_shape=self.input_shape))
-            for layer in range(1, self.num_layers):
-                self.add(Dense(units[layer], activs[layer]))
+            for layer in range(self.num_layers):
+                if layer == 0:
+                    self.add(Dense(
+                        units=unit_activ[layer][0],
+                        activation=unit_activ[layer][1],
+                        input_shape=self.train_data[0][0].shape))
+                self.add(Dense(unit_activ[layer][0], unit_activ[layer][1]))
+
 
     ## TRAIN THE MODEL
     def train(self):
         """
         Compiles the model, prints a summary, fits to data
         """
-        model.compile(optimizer = self.optimizer,
-                      loss = self.loss)
-        model.summary()
+        # compile and print summary
+        self.compile(optimizer = self.optimizer,
+                     loss = self.loss)
+        self.summary()
 
         # make callbacks and fit model
-        callbacks = get_callbacks()
+        callbacks = self.get_callbacks()
 
-        model.fit(x=self.input, y=self.targets,
-                  validation_data = self.val_dat,
-                  batch_size = self.batch_size,
-                  epochs = self.epochs,
-                  callbacks = self.callbacks)
+        # normalize train and validation targets
+        normed_train_targets = self.normalize_targets(self.train_data[1])
+        normed_val_targets = self.normalize_targets(self.val_data[1])
+#        val_in, val_out = self.val_data 
+#        normed_val_targets = self.normalize_targets(val_out)
+
+        # train model
+        self.fit(x=self.train_data[0], y=normed_train_targets,
+                 validation_data = (self.val_data[0], normed_val_targets),
+                 batch_size = self.batch_size,
+                 epochs = self.epochs,
+                 callbacks = callbacks,
+                 verbose=2)
 
     def get_callbacks(self):
         callbacks = []
-        for cb in self.callbacks:
-            if cb == 'tensorboard':
-                callbacks.append(tensorboard_callback())
-            if cb == 'learning_rate':
-                callbacks.append(learning_rate_callback())
+        for cb_code in self.callbacks:
+            if cb_code == 'tensorboard':
+                tb_callback = tensorboard_callback()
+                callbacks.append(tb_callback)
+            if cb_code == 'learning_rate':
+                lr_callback = learning_rate_callback()
+                callbacks.append(lr_callback)
         return callbacks
 
+    # NORMALIZING METHODS
+    def normalize_targets(self, targets):
+        """
+        Normalizes the dataset's targets
+        sets so they are bounded below by 0 and above by 1
+
+        This is the map x -> (x-a)/(b-a) for all x in (a,b)
+        """
+        normalized_targets = (targets - self.target_min) / self.target_range
+        return normalized_targets
+
+    def invert_normalize_targets(self, targets):
+        """
+        Inverse map of normalize_targets()
+        """
+        assert targets.shape[1] == len(self.target_range)
+        return targets * self.target_range + self.target_min
+
     ## CALCULATE RELATIVE ERRORS
-    def print_errors(self):
+    def print_errors(self, verbose=False):
         """
         Trained model is used to predict on test data,
         then computes the relative error (RE) to print
         statistics derived from RE.
         """
+        # get input and targets
         test_input = self.test_data[0]
-        test_targets = self.test_data[1]
-        Theta_predict = model.predict(test_input)
-        
-        # two cases: Theta is one dimensional or more
-        if Theta_predict.shape[1] == 1:
-            Theta_predict = np.squeeze(Theta_predict)
-            relError = np.abs(test_targets - Theta_predict)/test_targets
-            relErrMax = np.argmax(relError)
-        else:
-            relError = np.abs((test_targets - Theta_predict)/test_targets)
-            totalRelError = np.sum(relError, axis=0)
-            relErrMax = np.argmax(totalRelError)
-            relErrMin = np.argmin(totalRelError)
-        print('max relative error:', np.max(relError[relErrMax, :]))
-        print('min relative error:', np.min(relError[relErrMin, :]))
-        print('mean relative error:', np.mean(relError, axis=0))
-        print('max relative error true and predicted Theta:',
-                test_targets[relErrMax, :],
-                Theta_predict[relErrMax, :])
-        print('mean predicted Theta:', np.mean(Theta_predict, axis=0))
-        print('mean true Theta:', np.mean(test_targets, axis=0))
-        print('min predicted Theta:', np.min(Theta_predict, axis=0))
+        target_true = self.test_data[1]
+        print('true targets:\n', target_true[0:7])
+        norm_target_predict = self.predict(test_input)
+        print('predicted targets:\n', norm_target_predict[0:7])
+
+        # check test targets have same shape as predicted targets
+        assert target_true.shape == norm_target_predict.shape
+
+        # invert the normalization to avoid dividing by 0
+        target_predict = self.invert_normalize_targets(norm_target_predict)
+
+        # calculate relative error statistics
+        relErr = np.abs((target_true - target_predict) / target_true)
+        cumRelErr = np.sum(relErr, axis=1) # row sums of relErr
+        maxErr = np.argmax(cumRelErr)
+        minErr = np.argmin(cumRelErr)
+
+        # print diagnostics
+        if verbose:
+            print('test input shape', test_input.shape)
+            print('test targets shape', target_true.shape)
+            print('predicted normed target shape', norm_target_predict.shape)
+            print('predicted normed target range', 
+                    np.ptp(norm_target_predict, axis=0) )
+            print('target predicted range', np.ptp(target_predict, axis=0) )
+            print('true target range', np.ptp(target_true, axis=0) )
+            print('relErr shape', relErr.shape)
+            print('total relErr shape', cumRelErr.shape)
+            print('maxErr index', maxErr)
+            print('minErr index', minErr)
+
+        print('max cumulative relative error:', np.max(cumRelErr))
+        print('min cumulative relative error:', np.min(cumRelErr))
+        print('mean relative error:', np.mean(relErr, axis=0))
+        print('mean true target:', np.mean(target_true, axis=0))
+        print('mean predicted target:', np.mean(target_predict, axis=0))
+        print('max relative error:', np.max(relErr, axis=0))
+        print('max relative error true target:', target_true[maxErr])
+        print('max relative error predicted target:', target_predict[maxErr])
+        print('min relative error:', np.min(relErr, axis=0))
+        print('min relative error true target:', target_true[minErr])
+        print('min relative error predicted target:', target_predict[minErr])
 
 
 ## CALLBACKS
 # tensorboard logs callback
 def tensorboard_callback():
     log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    tb_callback = TensorBoard(log_dir=log_dir, histogram_freq=1)
+    tb_callback = TensorBoard(log_dir, histogram_freq=1)
     return tb_callback
 
 # lr scheduler callback

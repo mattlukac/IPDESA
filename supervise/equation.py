@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import pickle
 import importlib
@@ -24,15 +23,22 @@ class Equation:
 
     def simulate(self, replicates):
         """
-        Uses Equation() attributes to simulate a dataset
-        with size replicates
+        Uses Equation attributes to simulate a dataset
+        with size replicates and save data to a pickle
         """
+        # simulate the data
         domain = self.domain()
         uShape = (replicates, ) + domain.shape
         u = np.zeros(uShape)
         Thetas = self.Theta(replicates)
         for rep, Theta in enumerate(Thetas):
-            u[rep, :] = self.solution(Theta)
+            u[rep] = self.solution(Theta)
+
+        # Thetas must have at least one column
+        if Thetas.ndim == 1:
+            Thetas = Thetas.reshape(len(Thetas), 1)
+
+        # pickle the data
         theData = (u, Thetas)
         thePickle = open('data/' + self.name + '.pkl', 'wb')
         pickle.dump(theData, thePickle)
@@ -42,29 +48,33 @@ class Equation:
 class Dataset:
 
     def __init__(self, eqn_name):
-        self.eqn = Equation(eqn_name)
+        self.Eqn = Equation(eqn_name)
 
     def load(self, ratios=(0.6, 0.2, 0.2)):
         """
         Loads the (data, targets) tuple, then splits into
-        training, validation, and test sets.
-        Returns (train, val, test) 3-tuple of (data, targets) tuples
+        training, validation, and test sets represented as
+        Dataset attributes
         """
         assert sum(ratios) == 1.0
 
         # check pickled data exists; if not, simulate it
-        if not path.exists('data/' + self.eqn.name + '.pkl'):
+        if not path.exists('data/' + self.Eqn.name + '.pkl'):
             replicates = 2000
-            self.eqn.simulate(replicates)
+            self.Eqn.simulate(replicates)
             print('Training data did not exist.')
-            print('Simulated with {rep} replicates'.format(rep=replicates))
-            print('To change the number of replicates, \
-                use Equation.simulate(replicates)')
+            print('Simulated with %d replicates' % replicates)
+            print('To change the number of replicates,',
+                  'use Equation.simulate(replicates)')
 
-        thePickle = open('data/' + self.eqn.name + '.pkl', 'rb')
+        # load the pickled data
+        thePickle = open('data/' + self.Eqn.name + '.pkl', 'rb')
         theData = pickle.load(thePickle)
         thePickle.close()
         
+        # save normalizing constants then split
+        self.target_min = np.min(theData[1], axis=0)
+        self.target_range = np.max(theData[1], axis=0) - self.target_min
         self.split(theData, ratios)
 
     def split(self, data, ratios):
@@ -75,7 +85,6 @@ class Dataset:
         replicates = data[0].shape[0]
         trainSize = int(ratios[0]*replicates)
         validateSize = int(ratios[1]*replicates)
-        testSize = replicates - trainSize - validateSize
 
         # split to list [train, val, test]
         inputSplit = np.split(data[0], [trainSize, trainSize + validateSize])
@@ -85,24 +94,4 @@ class Dataset:
         self.train = (inputSplit[0], targetSplit[0])
         self.validate = (inputSplit[1], targetSplit[1])
         self.test = (inputSplit[2], targetSplit[2])
-
-
-def pickle_data(domain, Theta, solution, dataSizes):
-    # training, validation, test set sizes
-    dataTypes = ['train','val','test']
-    N = dict(zip(dataTypes, dataSizes))
-
-    # generate and save data
-    u = N.copy()
-    for dataType, dataSize in N.items():
-        # compute solutions
-        u[dataType] = np.zeros((dataSize, len(domain)))
-        for realization in range(dataSize):
-            u[dataType][realization,:] = solution(domain, Theta[dataType][realization,:])
-
-    # pickle the training data as the tuple (data, targets)
-    theData = (u, Theta)
-    thePickle = open('data.pkl', 'wb')
-    pickle.dump(theData, thePickle)
-    thePickle.close()
 
