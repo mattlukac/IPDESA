@@ -126,6 +126,18 @@ class Encoder(Sequential):
         minErr = np.argmin(cumRelErr)
 
         # print diagnostics
+        print('max cumulative relative error:', np.max(cumRelErr))
+        print('min cumulative relative error:', np.min(cumRelErr))
+        print('mean relative error:', np.mean(relErr, axis=0))
+        print('mean true target:', np.mean(target_true, axis=0))
+        print('mean predicted target:', np.mean(target_predict, axis=0))
+        print('\n max relative error (%):', 100*np.max(relErr, axis=0), '\n')
+        print('max relative error true target:', target_true[maxErr])
+        print('max relative error predicted target:', target_predict[maxErr])
+        print('min relative error (%):', 100*np.min(relErr, axis=0))
+        print('min relative error true target:', target_true[minErr])
+        print('min relative error predicted target:', target_predict[minErr])
+
         if verbose:
             print('test input shape', test_input.shape)
             print('test targets shape', target_true.shape)
@@ -138,18 +150,6 @@ class Encoder(Sequential):
             print('total relErr shape', cumRelErr.shape)
             print('maxErr index', maxErr)
             print('minErr index', minErr)
-
-        print('max cumulative relative error:', np.max(cumRelErr))
-        print('min cumulative relative error:', np.min(cumRelErr))
-        print('mean relative error:', np.mean(relErr, axis=0))
-        print('mean true target:', np.mean(target_true, axis=0))
-        print('mean predicted target:', np.mean(target_predict, axis=0))
-        print('\n max relative error (%):', 100*np.max(relErr, axis=0), '\n')
-        print('max relative error true target:', target_true[maxErr])
-        print('max relative error predicted target:', target_predict[maxErr])
-        print('min relative error:', np.min(relErr, axis=0))
-        print('min relative error true target:', target_true[minErr])
-        print('min relative error predicted target:', target_predict[minErr])
 
 
 ## CALLBACKS
@@ -171,6 +171,7 @@ def learning_rate_callback():
         if epoch < 100:
             return 0.001
         elif epoch < 200:
+
             return 0.0001
         elif epoch < 300:
             return 0.00005
