@@ -3,5 +3,5 @@ fenics_tutorials
 fenics_scripts/solutions
 test-*
 logs
-data
+data/*
 slurm*
