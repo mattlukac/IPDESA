@@ -16,7 +16,7 @@ class Encoder(Sequential):
         # attributes defined in design dictionary
         self.flavor = design['flavor']
         self.num_layers = len(design['unit_activations'])
-        self.optimizer = design['optimizer']
+        self.optim = design['optimizer']
         self.loss = design['loss']
         self.callbacks = design['callbacks']
         self.batch_size = design['batch_size']
@@ -48,7 +48,7 @@ class Encoder(Sequential):
         Compiles the model, prints a summary, fits to data
         """
         # compile and print summary
-        self.compile(optimizer = self.optimizer,
+        self.compile(optimizer = self.optim,
                      loss = self.loss)
         self.summary()
 
@@ -58,8 +58,6 @@ class Encoder(Sequential):
         # normalize train and validation targets
         normed_train_targets = self.normalize_targets(self.train_data[1])
         normed_val_targets = self.normalize_targets(self.val_data[1])
-#        val_in, val_out = self.val_data 
-#        normed_val_targets = self.normalize_targets(val_out)
 
         # train model
         self.fit(x=self.train_data[0], y=normed_train_targets,

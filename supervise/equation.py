@@ -12,7 +12,7 @@ class Equation:
         # load domain, solution, Theta from config file
         spec = importlib.util.spec_from_file_location(
                 self.name,
-                'equations/{name}.py'.format(name=self.name))
+                'equations/%s.py' % self.name)
         eqn = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(eqn)
 
@@ -36,13 +36,13 @@ class Equation:
 
         # Thetas must have at least one column
         if Thetas.ndim == 1:
-            Thetas = Thetas.reshape(len(Thetas), 1)
+            Thetas = Thetas.reshape(-1, 1)
 
         # pickle the data
         theData = (u, Thetas)
         if not os.path.exists('data/'):
             os.mkdir('data')
-        thePickle = open('data/' + self.name + '.pkl', 'wb')
+        thePickle = open('data/%s.pkl' % self.name, 'wb')
         pickle.dump(theData, thePickle)
         thePickle.close()
 
@@ -61,7 +61,7 @@ class Dataset:
         assert sum(ratios) == 1.0
 
         # check pickled data exists; if not, simulate it
-        if not os.path.exists('data/' + self.Eqn.name + '.pkl'):
+        if not os.path.exists('data/%s.pkl' % self.Eqn.name):
             replicates = 2000
             self.Eqn.simulate(replicates)
             print('Training data did not exist.')
@@ -70,13 +70,13 @@ class Dataset:
                   'use Equation.simulate(replicates)')
 
         # load the pickled data
-        thePickle = open('data/' + self.Eqn.name + '.pkl', 'rb')
+        thePickle = open('data/%s.pkl' % self.Eqn.name, 'rb')
         theData = pickle.load(thePickle)
         thePickle.close()
         
         # save normalizing constants then split
         self.target_min = np.min(theData[1], axis=0)
-        self.target_range = np.max(theData[1], axis=0) - self.target_min
+        self.target_range = np.ptp(theData[1], axis=0)
         self.split(theData, ratios)
 
     def split(self, data, ratios):
@@ -84,6 +84,7 @@ class Dataset:
         Splits the data into training, validation, and test sets
         whose sizes are specified by the 3-tuple ratios
         """
+        # get train, val, test set sizes
         replicates = data[0].shape[0]
         trainSize = int(ratios[0]*replicates)
         validateSize = int(ratios[1]*replicates)
@@ -92,8 +93,9 @@ class Dataset:
         inputSplit = np.split(data[0], [trainSize, trainSize + validateSize])
         targetSplit = np.split(data[1], [trainSize, trainSize + validateSize])
         
-        # assign train, validate, test attributes
-        self.train = (inputSplit[0], targetSplit[0])
-        self.validate = (inputSplit[1], targetSplit[1])
-        self.test = (inputSplit[2], targetSplit[2])
+        # assign train, val, test attributes
+        splits = [(inputSplit[i], targetSplit[i]) for i in range(len(ratios))]
+        self.train = splits[0]
+        self.validate =  splits[1]
+        self.test =  splits[2]
 
