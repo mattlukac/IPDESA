@@ -1,7 +1,7 @@
 import numpy as np
 import pickle
 import importlib
-from os import path
+import os
 
 
 class Equation:
@@ -40,6 +40,8 @@ class Equation:
 
         # pickle the data
         theData = (u, Thetas)
+        if not os.path.exists('data/'):
+            os.mkdir('data')
         thePickle = open('data/' + self.name + '.pkl', 'wb')
         pickle.dump(theData, thePickle)
         thePickle.close()
@@ -59,7 +61,7 @@ class Dataset:
         assert sum(ratios) == 1.0
 
         # check pickled data exists; if not, simulate it
-        if not path.exists('data/' + self.Eqn.name + '.pkl'):
+        if not os.path.exists('data/' + self.Eqn.name + '.pkl'):
             replicates = 2000
             self.Eqn.simulate(replicates)
             print('Training data did not exist.')
