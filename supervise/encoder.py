@@ -39,7 +39,8 @@ class Encoder(Sequential):
                         units=unit_activ[layer][0],
                         activation=unit_activ[layer][1],
                         input_shape=self.train_data[0][0].shape))
-                self.add(Dense(unit_activ[layer][0], unit_activ[layer][1]))
+                else:
+                    self.add(Dense(unit_activ[layer][0], unit_activ[layer][1]))
 
 
     ## TRAIN THE MODEL
@@ -56,12 +57,11 @@ class Encoder(Sequential):
         callbacks = self.get_callbacks()
 
         # normalize train and validation targets
-        normed_train_targets = self.normalize_targets(self.train_data[1])
-        normed_val_targets = self.normalize_targets(self.val_data[1])
+        train_targets = self.train_data[1]
+        normed_train_targets = train_targets*0.1
 
         # train model
         self.fit(x=self.train_data[0], y=normed_train_targets,
-                 validation_data = (self.val_data[0], normed_val_targets),
                  batch_size = self.batch_size,
                  epochs = self.epochs,
                  callbacks = callbacks,
@@ -83,11 +83,9 @@ class Encoder(Sequential):
         """
         Normalizes the dataset's targets
         sets so they are bounded below by 0 and above by 1
-
         This is the map x -> (x-a)/(b-a) for all x in (a,b)
         """
-        normalized_targets = (targets - self.target_min) / self.target_range
-        return normalized_targets
+        return (targets - self.target_min) / self.target_range
 
     def invert_normalize_targets(self, targets):
         """
@@ -106,35 +104,52 @@ class Encoder(Sequential):
         # get input and targets
         test_input = self.test_data[0]
         target_true = self.test_data[1]
-        print('training targets:\n', self.train_data[1])
-        print('min train target:', np.min(self.train_data[1]))
         norm_target_predict = self.predict(test_input)
+
+        # debugging...
+        print('\ninput shapes:')
+        print('  train set:', self.train_data[0].shape)
+        print('  val set:', self.val_data[0].shape)
+        print('  test set:', self.test_data[0].shape)
+        print('\noutput shapes:')
+        print('  train set:', self.train_data[1].shape)
+        print('  val set:', self.val_data[1].shape)
+        print('  test set:', self.test_data[1].shape)
+        print('\ninput ranges:')
+        print('  train set:', np.ptp(self.train_data[0]))
+        print('  val set:', np.ptp(self.val_data[0]))
+        print('  test set:', np.ptp(self.test_data[0]))
+        print('\noutput ranges:')
+        print('  train set:', np.ptp(self.train_data[1]))
+        print('  val set:', np.ptp(self.val_data[1]))
+        print('  test set:', np.ptp(self.test_data[1]))
 
         # check test targets have same shape as predicted targets
         assert target_true.shape == norm_target_predict.shape
 
         # invert the normalization to avoid dividing by 0
         target_predict = self.invert_normalize_targets(norm_target_predict)
+        print('\nmin val target:', np.min(self.val_data[1]))
         print('predicted targets:\n', target_predict[0:7])
 
         # calculate relative error statistics
-        relErr = np.abs((target_true - target_predict) / target_true)
-        cumRelErr = np.sum(relErr, axis=1) # row sums of relErr
-        maxErr = np.argmax(cumRelErr)
-        minErr = np.argmin(cumRelErr)
+        rel_err = np.abs((target_true - target_predict) / target_true)
+        cum_rel_err = np.sum(rel_err, axis=1) # row sums of rel_err
+        max_err = np.argmax(cum_rel_err)
+        min_err = np.argmin(cum_rel_err)
 
         # print diagnostics
-        print('max cumulative relative error:', np.max(cumRelErr))
-        print('min cumulative relative error:', np.min(cumRelErr))
-        print('mean relative error:', np.mean(relErr, axis=0))
+        print('max cumulative relative error:', np.max(cum_rel_err))
+        print('min cumulative relative error:', np.min(cum_rel_err))
+        print('mean relative error:', np.mean(rel_err, axis=0))
         print('mean true target:', np.mean(target_true, axis=0))
         print('mean predicted target:', np.mean(target_predict, axis=0))
-        print('\n max relative error (%):', 100*np.max(relErr, axis=0), '\n')
-        print('max relative error true target:', target_true[maxErr])
-        print('max relative error predicted target:', target_predict[maxErr])
-        print('min relative error (%):', 100*np.min(relErr, axis=0))
-        print('min relative error true target:', target_true[minErr])
-        print('min relative error predicted target:', target_predict[minErr])
+        print('\n max relative error (%):', 100*np.max(rel_err, axis=0), '\n')
+        print('max relative error true target:', target_true[max_err])
+        print('max relative error predicted target:', target_predict[max_err])
+        print('min relative error (%):', 100*np.min(rel_err, axis=0))
+        print('min relative error true target:', target_true[min_err])
+        print('min relative error predicted target:', target_predict[min_err])
 
         if verbose:
             print('test input shape', test_input.shape)
@@ -144,10 +159,10 @@ class Encoder(Sequential):
                     np.ptp(norm_target_predict, axis=0) )
             print('target predicted range', np.ptp(target_predict, axis=0) )
             print('true target range', np.ptp(target_true, axis=0) )
-            print('relErr shape', relErr.shape)
-            print('total relErr shape', cumRelErr.shape)
-            print('maxErr index', maxErr)
-            print('minErr index', minErr)
+            print('rel_err shape', rel_err.shape)
+            print('total rel_err shape', cum_rel_err.shape)
+            print('max_err index', max_err)
+            print('min_err index', min_err)
 
 
 ## CALLBACKS
@@ -169,7 +184,6 @@ def learning_rate_callback():
         if epoch < 100:
             return 0.001
         elif epoch < 200:
-
             return 0.0001
         elif epoch < 300:
             return 0.00005

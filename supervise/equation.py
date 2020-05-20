@@ -28,8 +28,8 @@ class Equation:
         """
         # simulate the data
         domain = self.domain()
-        uShape = (replicates, ) + domain.shape
-        u = np.zeros(uShape)
+        u_shape = (replicates, ) + domain.shape
+        u = np.zeros(u_shape)
         Thetas = self.Theta(replicates)
         for rep, Theta in enumerate(Thetas):
             u[rep] = self.solution(Theta)
@@ -39,12 +39,12 @@ class Equation:
             Thetas = Thetas.reshape(-1, 1)
 
         # pickle the data
-        theData = (u, Thetas)
+        the_data = (u, Thetas)
         if not os.path.exists('data/'):
             os.mkdir('data')
-        thePickle = open('data/%s.pkl' % self.name, 'wb')
-        pickle.dump(theData, thePickle)
-        thePickle.close()
+        the_pickle = open('data/%s.pkl' % self.name, 'wb')
+        pickle.dump(the_data, the_pickle)
+        the_pickle.close()
 
 
 class Dataset:
@@ -70,14 +70,14 @@ class Dataset:
                   'use Equation.simulate(replicates)')
 
         # load the pickled data
-        thePickle = open('data/%s.pkl' % self.Eqn.name, 'rb')
-        theData = pickle.load(thePickle)
-        thePickle.close()
+        the_pickle = open('data/%s.pkl' % self.Eqn.name, 'rb')
+        the_data = pickle.load(the_pickle)
+        the_pickle.close()
         
         # save normalizing constants then split
-        self.target_min = np.min(theData[1], axis=0)
-        self.target_range = np.ptp(theData[1], axis=0)
-        self.split(theData, ratios)
+        self.target_min = np.min(the_data[1], axis=0)
+        self.target_range = np.ptp(the_data[1], axis=0)
+        self.split(the_data, ratios)
 
     def split(self, data, ratios):
         """
@@ -86,15 +86,15 @@ class Dataset:
         """
         # get train, val, test set sizes
         replicates = data[0].shape[0]
-        trainSize = int(ratios[0]*replicates)
-        validateSize = int(ratios[1]*replicates)
+        train_size = int(ratios[0]*replicates)
+        val_size = int(ratios[1]*replicates)
 
         # split to list [train, val, test]
-        inputSplit = np.split(data[0], [trainSize, trainSize + validateSize])
-        targetSplit = np.split(data[1], [trainSize, trainSize + validateSize])
+        input_split = np.split(data[0], [train_size, train_size + val_size])
+        target_split = np.split(data[1], [train_size, train_size + val_size])
         
         # assign train, val, test attributes
-        splits = [(inputSplit[i], targetSplit[i]) for i in range(len(ratios))]
+        splits = [(input_split[i], target_split[i]) for i in range(len(ratios))]
         self.train = splits[0]
         self.validate =  splits[1]
         self.test =  splits[2]
