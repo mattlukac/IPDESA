@@ -20,6 +20,7 @@ class Equation:
         self.domain = eqn.domain
         self.solution = eqn.solution
         self.Theta = eqn.Theta
+        self.Theta_names = eqn.Theta_names
 
     def simulate(self, replicates):
         """

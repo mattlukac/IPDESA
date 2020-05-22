@@ -12,7 +12,8 @@ Here we have Theta = (u0, u1, f).
 
 import numpy as np 
 
-# Define domain, Theta, solution
+# list for plot titles
+Theta_names = [r'$u_0$', r'$u_1$', r'$f$']
 
 # DOMAIN
 def domain():
