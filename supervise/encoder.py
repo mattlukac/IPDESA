@@ -29,9 +29,16 @@ class Encoder(Sequential):
         self.target_min = Dataset.target_min
         self.target_range = Dataset.target_range
 
+        # check target ranges
+        print('INITIALIZED ENCODER CLASS')
+        print('train targs have range', np.ptp(self.train_data[1], axis=0))
+        print('val targs have range', np.ptp(self.val_data[1], axis=0))
+        print('test targs have range', np.ptp(self.test_data[1], axis=0))
+
         # build feed forward network
         if self.flavor == 'ff':
             unit_activ = design['unit_activations']
+            drops = design['dropout']
             # construct network
             for layer in range(self.num_layers):
                 if layer == 0:
@@ -40,6 +47,7 @@ class Encoder(Sequential):
                         activation=unit_activ[layer][1],
                         input_shape=self.train_data[0][0].shape))
                 else:
+                    self.add(Dropout(drops[layer-1]))
                     self.add(Dense(unit_activ[layer][0], unit_activ[layer][1]))
 
 
@@ -51,21 +59,35 @@ class Encoder(Sequential):
         # compile and print summary
         self.compile(optimizer = self.optim,
                      loss = self.loss)
-        self.summary()
+        #self.summary()
 
         # make callbacks and fit model
         callbacks = self.get_callbacks()
 
         # normalize train and validation targets
         train_targets = self.train_data[1]
-        normed_train_targets = train_targets*0.1
+        val_targets = self.val_data[1]
+        normed_train_targets = self.normalize_targets(train_targets.copy())
+        normed_val_targets = self.normalize_targets(val_targets.copy())
+        normed_val_data = (self.val_data[0], normed_val_targets)
+
+        # test normalization procedure 
+        print('train_targets range:', np.ptp(train_targets, axis=0))
+        print('normed_train_targets range:', np.ptp(normed_train_targets, axis=0))
 
         # train model
         self.fit(x=self.train_data[0], y=normed_train_targets,
+                 validation_data=normed_val_data, 
                  batch_size = self.batch_size,
                  epochs = self.epochs,
                  callbacks = callbacks,
                  verbose=2)
+        
+        # evaluate model
+        test_targets = self.test_data[1]
+        normed_test_targets = self.normalize_targets(test_targets.copy())
+        results = self.evaluate(self.test_data[0], normed_test_targets)
+        print('test loss', results)
 
     def get_callbacks(self):
         callbacks = []
@@ -85,14 +107,24 @@ class Encoder(Sequential):
         sets so they are bounded below by 0 and above by 1
         This is the map x -> (x-a)/(b-a) for all x in (a,b)
         """
-        return (targets - self.target_min) / self.target_range
+        print('NORMALIZING TARGETS...')
+        print('og targs have range', np.ptp(targets, axis=0))
+        targets -= self.target_min 
+        targets /= self.target_range
+        print('normed targs have range', np.ptp(targets, axis=0))
+        return targets
 
     def invert_normalize_targets(self, targets):
         """
         Inverse map of normalize_targets()
         """
         assert targets.shape[1] == len(self.target_range)
-        return targets * self.target_range + self.target_min
+        print('INVERTING NORMALIZED TARGETS...')
+        print('normed targs have range', np.ptp(targets, axis=0))
+        targets *= self.target_range
+        targets += self.target_min
+        print('og targs have range', np.ptp(targets, axis=0))
+        return targets
 
     ## CALCULATE RELATIVE ERRORS
     def print_errors(self, verbose=False):
@@ -104,61 +136,48 @@ class Encoder(Sequential):
         # get input and targets
         test_input = self.test_data[0]
         target_true = self.test_data[1]
-        norm_target_predict = self.predict(test_input)
-
-        # debugging...
-        print('\ninput shapes:')
-        print('  train set:', self.train_data[0].shape)
-        print('  val set:', self.val_data[0].shape)
-        print('  test set:', self.test_data[0].shape)
-        print('\noutput shapes:')
-        print('  train set:', self.train_data[1].shape)
-        print('  val set:', self.val_data[1].shape)
-        print('  test set:', self.test_data[1].shape)
-        print('\ninput ranges:')
-        print('  train set:', np.ptp(self.train_data[0]))
-        print('  val set:', np.ptp(self.val_data[0]))
-        print('  test set:', np.ptp(self.test_data[0]))
-        print('\noutput ranges:')
-        print('  train set:', np.ptp(self.train_data[1]))
-        print('  val set:', np.ptp(self.val_data[1]))
-        print('  test set:', np.ptp(self.test_data[1]))
+        normed_target_pred = self.predict(test_input)
 
         # check test targets have same shape as predicted targets
-        assert target_true.shape == norm_target_predict.shape
+        assert target_true.shape == normed_target_pred.shape
 
-        # invert the normalization to avoid dividing by 0
-        target_predict = self.invert_normalize_targets(norm_target_predict)
-        print('\nmin val target:', np.min(self.val_data[1]))
-        print('predicted targets:\n', target_predict[0:7])
+        # invert the normalization
+        target_pred = self.invert_normalize_targets(normed_target_pred.copy())
+        print('normed pred targ\n', normed_target_pred[0:10])
+        print('pred targ\n', target_pred[0:10])
+        print('true targ\n', target_true[0:10])
 
         # calculate relative error statistics
-        rel_err = np.abs((target_true - target_predict) / target_true)
+        rel_err = np.abs((target_true - target_pred) / target_true)
         cum_rel_err = np.sum(rel_err, axis=1) # row sums of rel_err
         max_err = np.argmax(cum_rel_err)
         min_err = np.argmin(cum_rel_err)
 
         # print diagnostics
-        print('max cumulative relative error:', np.max(cum_rel_err))
-        print('min cumulative relative error:', np.min(cum_rel_err))
-        print('mean relative error:', np.mean(rel_err, axis=0))
-        print('mean true target:', np.mean(target_true, axis=0))
-        print('mean predicted target:', np.mean(target_predict, axis=0))
-        print('\n max relative error (%):', 100*np.max(rel_err, axis=0), '\n')
+        print('\nRELATIVE ERRORS (%):')
+        print('\n max relative error:', 100*np.max(rel_err, axis=0))
+        print('\n min relative error:', 100*np.min(rel_err, axis=0), '\n')
+        print('max cumulative:', 100*np.max(cum_rel_err))
+        print('min cumulative:', 100*np.min(cum_rel_err))
+        print('mean relative error:', 100*np.mean(rel_err, axis=0))
+        
+        print('\nTRUE AND PREDICTED TARGETS:')
         print('max relative error true target:', target_true[max_err])
-        print('max relative error predicted target:', target_predict[max_err])
-        print('min relative error (%):', 100*np.min(rel_err, axis=0))
+        print('max relative error predicted target:', target_pred[max_err])
+        print('mean true target:', np.mean(target_true, axis=0))
+        print('mean predicted target:', np.mean(target_pred, axis=0))
         print('min relative error true target:', target_true[min_err])
-        print('min relative error predicted target:', target_predict[min_err])
+        print('min relative error predicted target:', target_pred[min_err])
 
         if verbose:
+            print('\nVERBOSE OUTPUT:')
+            print('range and min shapes', self.target_range.shape, self.target_min.shape)
             print('test input shape', test_input.shape)
             print('test targets shape', target_true.shape)
-            print('predicted normed target shape', norm_target_predict.shape)
-            print('predicted normed target range', 
-                    np.ptp(norm_target_predict, axis=0) )
-            print('target predicted range', np.ptp(target_predict, axis=0) )
-            print('true target range', np.ptp(target_true, axis=0) )
+            print('predicted normed target shape', normed_target_pred.shape)
+            print('predicted normed target range', np.ptp(normed_target_pred, axis=0))
+            print('target predicted range', np.ptp(target_pred, axis=0))
+            print('true target range', np.ptp(target_true, axis=0))
             print('rel_err shape', rel_err.shape)
             print('total rel_err shape', cum_rel_err.shape)
             print('max_err index', max_err)
