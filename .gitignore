@@ -1,9 +1,9 @@
 *.DS_Store
 fenics_tutorials
-fenics_scripts/solutions
-test-*
+fenics_scripts
+tests
 logs
 data/*
 slurm*
 equations/__pycache__
-supervise/__pycache__
+autoencoder/supervise/__pycache__
