@@ -4,11 +4,11 @@ from tensorflow.random import set_seed
 
 # get the equation name
 parser = argparse.ArgumentParser()
-parser.add_argument('--train_on', 
-        help='name of file containing the training data')
+parser.add_argument('--trainon', 
+        help='name of file containing the configuration data')
 args = parser.parse_args()
 
-eqn_name = args.train_on
+eqn_name = args.trainon
 
 ## LOAD DATA
 dataset = equation.Dataset(eqn_name)
