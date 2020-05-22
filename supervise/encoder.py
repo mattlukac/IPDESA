@@ -3,6 +3,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 from tensorflow.keras.layers import *
 from tensorflow.keras.callbacks import TensorBoard, LearningRateScheduler
 from tensorflow.keras import Sequential
+from sklearn import preprocessing 
 import numpy as np
 import datetime
 from . import equation
@@ -56,6 +57,22 @@ class Encoder(Sequential):
         """
         Compiles the model, prints a summary, fits to data
         """
+        # preprocess features and targets
+        x_train, y_train = self.train_data 
+        x_val, y_val = self.val_data 
+        
+        ## normalize inputs
+        train_normalizer = preprocessing.Normalizer()
+        val_normalizer = preprocessing.Normalizer()
+        x_train_norm = train_normalizer.fit_transform(x_train)
+        x_val_norm = val_normalizer.fit_transform(x_val)
+
+        ## rescale targets to unit interval
+        train_scaler = preprocessing.MinMaxScaler()
+        val_scaler = preprocessing.MinMaxScaler()
+        y_train_scale = train_scaler.fit_transform(y_train)
+        y_val_scale = val_scaler.fit_transform(y_val)
+
         # compile and print summary
         self.compile(optimizer = self.optim,
                      loss = self.loss)
@@ -64,31 +81,14 @@ class Encoder(Sequential):
         # make callbacks and fit model
         callbacks = self.get_callbacks()
 
-        # normalize train and validation targets
-        train_targets = self.train_data[1]
-        val_targets = self.val_data[1]
-        normed_train_targets = self.normalize_targets(train_targets.copy())
-        normed_val_targets = self.normalize_targets(val_targets.copy())
-        normed_val_data = (self.val_data[0], normed_val_targets)
-
-        # test normalization procedure 
-        print('train_targets range:', np.ptp(train_targets, axis=0))
-        print('normed_train_targets range:', np.ptp(normed_train_targets, axis=0))
-
         # train model
-        self.fit(x=self.train_data[0], y=normed_train_targets,
-                 validation_data=normed_val_data, 
+        self.fit(x=x_train_norm, y=y_train_scale,
+                 validation_data=(x_val_norm, y_val_scale), 
                  batch_size = self.batch_size,
                  epochs = self.epochs,
                  callbacks = callbacks,
                  verbose=2)
         
-        # evaluate model
-        test_targets = self.test_data[1]
-        normed_test_targets = self.normalize_targets(test_targets.copy())
-        results = self.evaluate(self.test_data[0], normed_test_targets)
-        print('test loss', results)
-
     def get_callbacks(self):
         callbacks = []
         for cb_code in self.callbacks:
@@ -99,6 +99,70 @@ class Encoder(Sequential):
                 lr_callback = learning_rate_callback()
                 callbacks.append(lr_callback)
         return callbacks
+
+    ## CALCULATE RELATIVE ERRORS
+    def print_errors(self, verbose=False):
+        """
+        Trained model is used to predict on test data,
+        then computes the relative error (RE) to print
+        statistics derived from RE.
+        """
+        # get input and targets
+        x_test, y_test = self.test_data
+        test_normalizer = preprocessing.Normalizer()
+        test_scaler = preprocessing.MinMaxScaler()
+        x_test_norm = test_normalizer.fit_transform(x_test)
+        y_test_scale = test_scaler.fit_transform(y_test)
+
+        # evaluate model
+        results = self.evaluate(x_test_norm, y_test_scale)
+        print('test loss', results)
+        y_test_scale_pred = self.predict(x_test_norm)
+
+        # check test targets have same shape as predicted targets
+        assert y_test_scale_pred.shape == y_test_scale.shape
+
+        # invert the normalization
+        y_test_pred = test_scaler.inverse_transform(y_test_scale_pred)
+        print('scaled predicted test y\n', y_test_scale_pred[0:10])
+        print('predicted test y\n', y_test_pred[0:10])
+        print('true test y\n', y_test[0:10])
+
+        # calculate relative error statistics
+        print('min y test scale', np.min(y_test_scale, axis=0))
+        rel_err = np.abs(1.0 - y_test_pred / y_test)
+        cum_rel_err = np.sum(rel_err, axis=1) # row sums of rel_err
+        max_err = np.argmax(cum_rel_err)
+        min_err = np.argmin(cum_rel_err)
+
+        # print diagnostics
+        print('\nRELATIVE ERRORS (%):')
+        print('\n max relative error:', 100*np.max(rel_err, axis=0))
+        print('\n min relative error:', 100*np.min(rel_err, axis=0), '\n')
+        print('max cumulative:', 100*np.max(cum_rel_err))
+        print('min cumulative:', 100*np.min(cum_rel_err))
+        print('mean relative error:', 100*np.mean(rel_err, axis=0))
+
+        if verbose:
+            print('\nVERBOSE OUTPUT:')
+            print('\nTRUE AND PREDICTED TARGETS:')
+            print('max relative error true target:', y_test[max_err])
+            print('max relative error predicted target:', y_test_pred[max_err])
+            print('mean true target:', np.mean(y_test, axis=0))
+            print('mean predicted target:', np.mean(y_test_pred, axis=0))
+            print('min relative error true target:', y_test[min_err])
+            print('min relative error predicted target:', y_test_pred[min_err])
+            print('range and min shapes', self.target_range.shape, self.target_min.shape)
+            print('test input shape', x_test.shape)
+            print('test targets shape', y_test.shape)
+            print('predicted normed target shape', y_test_scale_pred.shape)
+            print('predicted normed target range', np.ptp(y_test_scale_pred, axis=0))
+            print('target predicted range', np.ptp(y_test_pred, axis=0))
+            print('true target range', np.ptp(y_test, axis=0))
+            print('rel_err shape', rel_err.shape)
+            print('total rel_err shape', cum_rel_err.shape)
+            print('max_err index', max_err)
+            print('min_err index', min_err)
 
     # NORMALIZING METHODS
     def normalize_targets(self, targets):
@@ -126,63 +190,6 @@ class Encoder(Sequential):
         print('og targs have range', np.ptp(targets, axis=0))
         return targets
 
-    ## CALCULATE RELATIVE ERRORS
-    def print_errors(self, verbose=False):
-        """
-        Trained model is used to predict on test data,
-        then computes the relative error (RE) to print
-        statistics derived from RE.
-        """
-        # get input and targets
-        test_input = self.test_data[0]
-        target_true = self.test_data[1]
-        normed_target_pred = self.predict(test_input)
-
-        # check test targets have same shape as predicted targets
-        assert target_true.shape == normed_target_pred.shape
-
-        # invert the normalization
-        target_pred = self.invert_normalize_targets(normed_target_pred.copy())
-        print('normed pred targ\n', normed_target_pred[0:10])
-        print('pred targ\n', target_pred[0:10])
-        print('true targ\n', target_true[0:10])
-
-        # calculate relative error statistics
-        rel_err = np.abs((target_true - target_pred) / target_true)
-        cum_rel_err = np.sum(rel_err, axis=1) # row sums of rel_err
-        max_err = np.argmax(cum_rel_err)
-        min_err = np.argmin(cum_rel_err)
-
-        # print diagnostics
-        print('\nRELATIVE ERRORS (%):')
-        print('\n max relative error:', 100*np.max(rel_err, axis=0))
-        print('\n min relative error:', 100*np.min(rel_err, axis=0), '\n')
-        print('max cumulative:', 100*np.max(cum_rel_err))
-        print('min cumulative:', 100*np.min(cum_rel_err))
-        print('mean relative error:', 100*np.mean(rel_err, axis=0))
-        
-        print('\nTRUE AND PREDICTED TARGETS:')
-        print('max relative error true target:', target_true[max_err])
-        print('max relative error predicted target:', target_pred[max_err])
-        print('mean true target:', np.mean(target_true, axis=0))
-        print('mean predicted target:', np.mean(target_pred, axis=0))
-        print('min relative error true target:', target_true[min_err])
-        print('min relative error predicted target:', target_pred[min_err])
-
-        if verbose:
-            print('\nVERBOSE OUTPUT:')
-            print('range and min shapes', self.target_range.shape, self.target_min.shape)
-            print('test input shape', test_input.shape)
-            print('test targets shape', target_true.shape)
-            print('predicted normed target shape', normed_target_pred.shape)
-            print('predicted normed target range', np.ptp(normed_target_pred, axis=0))
-            print('target predicted range', np.ptp(target_pred, axis=0))
-            print('true target range', np.ptp(target_true, axis=0))
-            print('rel_err shape', rel_err.shape)
-            print('total rel_err shape', cum_rel_err.shape)
-            print('max_err index', max_err)
-            print('min_err index', min_err)
-
 
 ## CALLBACKS
 # tensorboard logs callback
@@ -200,13 +207,13 @@ def learning_rate_callback():
     so the optimizer doesn't hop over relative minimums.
     """
     def lr_sched(epoch):
-        if epoch < 100:
+        if epoch < 30:
             return 0.001
-        elif epoch < 200:
+        elif epoch < 60:
             return 0.0001
-        elif epoch < 300:
+        elif epoch < 90:
             return 0.00005
-        elif epoch < 400:
+        elif epoch < 120:
             return 0.00005
         else:
             return 0.00005
