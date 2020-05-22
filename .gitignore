@@ -1,11 +1,14 @@
+# files
 *.DS_Store
-visuals
-fenics_tutorials
-fenics_scripts
-tests
-logs
-data/*
 slurm*
+
+# directories
+visuals/
+fenics_tutorials/
+fenics_scripts/
+tests/
+logs/
+data/*
 equations/__pycache__
 autoencoder/supervise/__pycache__
 autoencoder/__pycache__
