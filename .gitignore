@@ -1,4 +1,5 @@
 *.DS_Store
+visuals
 fenics_tutorials
 fenics_scripts
 tests
