@@ -32,5 +32,5 @@ You will find plots of the predicted vs true `Theta` values in
 `logs/fit/{datetime}/` where `datetime` is the date and time 
 at which the encoder was trained.
 
-A more detailed example of training using `poisson.py` 
-is contained in `jupyter_notebooks/`.
+A more detailed example of training using `poisson.py` is
+worked through in `poisson_encoder_example.ipynb`.
