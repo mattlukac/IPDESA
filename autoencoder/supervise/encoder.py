@@ -35,12 +35,6 @@ class Encoder(Sequential):
         # set log directory
         self.log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-        # check target ranges
-        print('INITIALIZED ENCODER CLASS')
-        print('train y range', np.ptp(self.train_data[1], axis=0))
-        print('val y range', np.ptp(self.val_data[1], axis=0))
-        print('test y range', np.ptp(self.test_data[1], axis=0))
-
         # build feed forward network
         if self.flavor == 'ff':
             unit_activ = design['unit_activations']
@@ -94,7 +88,7 @@ class Encoder(Sequential):
                  callbacks = callbacks,
                  verbose=2)
         
-    def predict_plot(self):
+    def predict_plot(self, here=False):
         # get input and targets
         x_test, y_test = self.test_data
         test_transformer = preprocessing.MaxAbsScaler()
@@ -103,7 +97,7 @@ class Encoder(Sequential):
         y_test_trans = test_transformer.fit_transform(y_test)
 
         # predict with trained model
-        results = self.evaluate(x_test_trans, y_test_trans)
+        results = self.evaluate(x_test_trans, y_test_trans, verbose=0)
         print('test loss:', results)
         y_test_trans_pred = self.predict(x_test_trans)
         y_test_pred = test_transformer.inverse_transform(y_test_trans_pred)
@@ -112,26 +106,39 @@ class Encoder(Sequential):
         ncols = y_test.shape[1]
         fig, ax = plt.subplots(nrows=1, ncols=ncols, 
                                sharex=True, sharey=True,
-                               figsize=(20,10))
+                               figsize=(20,8),
+                               dpi=200)
         for col in range(ncols):
-            ax[col].scatter(y_test_trans[:,col], y_test_trans_pred[:,col])
-            ax[col].set_title(self.Theta_names[col], fontsize=18)
+            ax[col].scatter(y_test_trans[:,col], y_test_trans_pred[:,col], alpha=0.7)
+            ax[col].set_title(self.Theta_names[col], fontsize=22)
+            ax[col].plot([0,1], [0,1], 
+                    transform=ax[col].transAxes, 
+                    c='r', 
+                    linewidth=3)
         fig.add_subplot(111, frame_on=False)
         plt.tick_params(labelcolor='none', bottom=False, left=False)
-        plt.xlabel('Truth', fontsize=18)
-        plt.ylabel('Prediction', fontsize=18)
+        plt.xlabel('Truth', fontsize=22)
+        plt.ylabel('Prediction', fontsize=22)
+        if 'tensorboard' not in self.callbacks:
+            os.mkdir(self.log_dir)
         fig.savefig(self.log_dir + '/transformed_predict_vs_true.png')
         plt.close(fig)
 
-        # plot inverse transformed predicted vs true
-        fig, ax = plt.subplots(nrows=1, ncols=ncols, figsize=(20,10))
+        # plot original scale predicted vs true
+        fig, ax = plt.subplots(nrows=1, ncols=ncols, figsize=(20,8), dpi=200)
         for col in range(ncols):
-            ax[col].scatter(y_test[:,col], y_test_pred[:,col])
-            ax[col].set_title(self.Theta_names[col], fontsize=18)
+            ax[col].scatter(y_test[:,col], y_test_pred[:,col], alpha=0.7)
+            ax[col].set_title(self.Theta_names[col], fontsize=22)
+            ax[col].plot([0,1], [0,1], 
+                    transform=ax[col].transAxes, 
+                    c='r',
+                    linewidth=3)
         fig.add_subplot(111, frame_on=False)
         plt.tick_params(labelcolor='none', bottom=False, left=False)
-        plt.xlabel('Truth', fontsize=18)
-        plt.ylabel('Prediction', fontsize=18)
+        plt.xlabel('Truth', fontsize=22)
+        plt.ylabel('Prediction', fontsize=22)
+        if here:
+            plt.show()
         fig.savefig(self.log_dir + '/predict_vs_true.png')
         plt.close(fig)
 

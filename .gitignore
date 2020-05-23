@@ -3,6 +3,7 @@
 slurm*
 
 # directories
+.ipynb_checkpoints/
 visuals/
 fenics_tutorials/
 fenics_scripts/
