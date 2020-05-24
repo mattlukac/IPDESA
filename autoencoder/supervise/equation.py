@@ -9,7 +9,7 @@ class Equation:
     def __init__(self, eqn_name):
         self.name = eqn_name
 
-        # load domain, solution, Theta from config file
+        # load config file
         spec = importlib.util.spec_from_file_location(
                 self.name,
                 'equations/%s.py' % self.name)
@@ -17,10 +17,16 @@ class Equation:
         spec.loader.exec_module(eqn)
 
         # assign config functions to Equation
+        self.Theta_names = eqn.Theta_names
         self.domain = eqn.domain
         self.solution = eqn.solution
         self.Theta = eqn.Theta
-        self.Theta_names = eqn.Theta_names
+
+    def vectorize_u(self, Thetas):
+        u = []
+        for theta in Thetas:
+            u.append(self.solution(theta))
+        return np.array(u)
 
     def simulate(self, replicates):
         """
@@ -28,13 +34,9 @@ class Equation:
         with size replicates and save data to a pickle
         """
         # simulate the data
-        domain = self.domain()
-        u_shape = (replicates, ) + domain.shape
-        u = np.zeros(u_shape)
         Thetas = self.Theta(replicates)
-        for rep, Theta in enumerate(Thetas):
-            u[rep] = self.solution(Theta)
-
+        u = self.vectorize_u(Thetas)
+        
         # Thetas must have at least one column
         if Thetas.ndim == 1:
             Thetas = Thetas.reshape(-1, 1)
@@ -70,14 +72,10 @@ class Dataset:
             print('To change the number of replicates,',
                   'use Equation.simulate(replicates)')
 
-        # load the pickled data
+        # load the pickled data and split
         the_pickle = open('data/%s.pkl' % self.Eqn.name, 'rb')
         the_data = pickle.load(the_pickle)
         the_pickle.close()
-        
-        # save normalizing constants then split
-        self.target_min = np.min(the_data[1], axis=0)
-        self.target_range = np.ptp(the_data[1], axis=0)
         self.split(the_data, ratios)
 
     def split(self, data, ratios):
