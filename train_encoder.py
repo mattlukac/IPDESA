@@ -20,11 +20,10 @@ out_units = dataset.train[1].shape[1]
 ## DEFINE MODEL PARAMETERS
 design = {'flavor':'ff',
           'unit_activations':[(in_units, 'tanh'),
-                              (100, 'tanh'),
                               (50, 'tanh'),
                               (out_units, 'linear')
                              ],
-          'dropout':[0.1, 0.1, 0.1],
+          'dropout':[0.1, 0.],
           'optimizer':'adam',
           'loss':'mse',
           'callbacks':['learning_rate', 'tensorboard'],
