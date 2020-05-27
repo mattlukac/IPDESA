@@ -1,7 +1,6 @@
 # files
 *.DS_Store
 slurm*
-*.ipynb
 
 # directories
 .ipynb_checkpoints/
