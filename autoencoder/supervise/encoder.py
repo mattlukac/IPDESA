@@ -13,7 +13,7 @@ from . import equation
 class Encoder(Sequential):
 
     def __init__(self, design, Dataset):
-        super().__init__()
+        super(Encoder, self).__init__()
 
         # attributes defined in design dictionary
         self.flavor = design['flavor']
@@ -75,7 +75,7 @@ class Encoder(Sequential):
         # compile and print summary
         self.compile(optimizer = self.optim,
                      loss = self.loss)
-        #self.summary()
+        self.summary()
 
         # make callbacks and fit model
         callbacks = self.get_callbacks()
