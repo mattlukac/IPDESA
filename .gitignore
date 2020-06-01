@@ -6,6 +6,7 @@ decoder*
 
 # directories
 .ipynb_checkpoints/
+notebooks/
 visuals/
 fenics_tutorials/
 fenics_scripts/
