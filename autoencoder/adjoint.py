@@ -265,7 +265,7 @@ class PoissonBC(Poisson):
         thetas = dict() # to store iterations
         err = np.sum(np.abs(theta_init - self.theta_true)) # L1 error
         iter_count = 0 
-        thetas.update( {iter_count: theta_init.copy()} )
+        thetas[iter_count] = np.array(theta_init.copy())
         theta_new = theta_init
 
         while iter_count < max_iter and tol < err:
@@ -359,6 +359,9 @@ class PoissonBC(Poisson):
         # make names
         theta_names = [r'$c$', r'$b_0$', r'$b_1$']
         theta_true_names = [r'$\kappa$', r'$\beta_0$', r'$\beta_1$']
+        def ordered_pair(x, y):
+            pair = '(' + x + ', ' + y + ')'
+            return pair
         
         # get thetas from gradient descent
         descent, _  = self.gradient_descent(theta_init, gamma, tol, max_iter)
@@ -375,17 +378,12 @@ class PoissonBC(Poisson):
         for i in range(self.T):
             j = (i + 1) % 3
             ax[i].plot(thetas[:, i] , thetas[:, j], linewidth=3)
-            truth = ax[i].scatter(self.theta_true[i], self.theta_true[j], 
+            ax[i].scatter(self.theta_true[i], self.theta_true[j], 
                     s=15 ** 2, c='r')
-            ax[i].set_xlabel(theta_names[i])
-            ax[i].set_ylabel(theta_names[j])
-            #ax[i].set_title(theta_names[i])
-            point_name = '(' 
-            point_name += theta_true_names[i] 
-            point_name += ', ' 
-            point_name += theta_true_names[j] 
-            point_name += ')'
-            ax[i].legend([truth], [point_name])
+            optim_name = ordered_pair(theta_true_names[i], 
+                                      theta_true_names[j])
+            curve_name = ordered_pair(theta_names[i], theta_names[j])
+            ax[i].legend([curve_name, optim_name])
         fig.add_subplot(111, frame_on=False)
         plt.tick_params(labelcolor='none', bottom=False, left=False)
         title = '%d iterations to convergence, ' % num_iters
@@ -432,7 +430,6 @@ class PoissonBC(Poisson):
         Phi = self.solver(self.theta_true)
         Phi_plt = ax.plot(x, Phi, linewidth=3, linestyle='dashed', c='black')
         # plot the first n curves
-        axs = []
         for i in range(num_iters):
             curve = self.solver(theta[i]).flatten() 
             alpha_i = 1./(i+2) + 0.01
@@ -444,6 +441,4 @@ class PoissonBC(Poisson):
         plt.xlabel(r'$\Omega$', fontsize=33)
         plt.ylabel(r'$u$', fontsize=33)
         plt.title('Learning Rate ' + r'$\gamma = %.1f$' % gamma)
-        plt.show()
-        plt.close()
-
+        return ax 
