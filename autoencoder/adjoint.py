@@ -18,12 +18,31 @@ class Poisson:
 
     def __init__(self, kappa, bc, resolution=99):
         self.dx = 1. / resolution    # step size dx
-        self.U = resolution - 1      # interior soln dimension
-        self.T = 1                   # parameter dimension
+        self.u_dim = resolution - 1  # interior soln dimension
+        self.domain = np.linspace(
+                self.dx, 
+                1. - self.dx, 
+                self.u_dim)          # Omega = (0, 1)
+        self.num_params = 1          # parameter dimension
         self.kappa = kappa           # true constant force term
         self.b0 = bc[0]              # left boundary condition
         self.b1 = bc[1]              # right boundary condition
+        self.Phi = self.solver(kappa)# observed data
         self.Lap = self.Laplacian()  # discrete Laplacian
+
+    def solver(self, c):
+        """
+        Computes the solution u given force parameter c
+        Acts as a proxy for the PDE solver
+        """
+        x = self.domain.reshape((self.u_dim, 1))
+        soln = np.zeros((self.u_dim, 1))
+        # add quad, linear, intercept terms
+        soln += -c / 2 * x ** 2
+        soln += (c / 2 + self.b1 - self.b0) * x
+        soln += self.b0 
+
+        return soln
 
     def Laplacian(self):
         """
@@ -34,7 +53,7 @@ class Poisson:
         diags = [x / self.dx ** 2 for x in diags]
         Delta = sparse.diags(diagonals=diags,
                              offsets=[-1, 0, 1], 
-                             shape=(self.U, self.U),
+                             shape=(self.u_dim, self.u_dim),
                              format='csr')
         return Delta
 
@@ -52,24 +71,9 @@ class Poisson:
         # solve linear adjoint system, compute gradient
         dLdu = (u - Phi) * self.dx
         lamb = spsolve(self.Lap, dLdu)
-        dFdc = np.ones((self.U, self.T))
+        dFdc = np.ones((self.u_dim, self.num_params))
         gradient = -lamb.T.dot(dFdc)
         return gradient.item()
-
-    def solver(self, c):
-        """
-        Computes the solution u given force parameter c
-        Acts as a proxy for the PDE solver
-        """
-        x = np.linspace(self.dx, 1. - self.dx, self.U)
-        x = x.reshape((self.U, 1))
-        soln = np.zeros((self.U, 1))
-        # add quad, linear, intercept terms
-        soln += -c / 2 * x ** 2
-        soln += (c / 2 + self.b1 - self.b0) * x
-        soln += self.b0 
-
-        return soln
 
     def gradient_descent(self, c_init, gamma, tol, max_iter=500):
         """
@@ -80,28 +84,73 @@ class Poisson:
             tol - acceptable distance from kappa
             max_iter - bound for number of iterations
 
-        Returns values of c during convergence and number of iterations
+        Returns dictionary of {num_iter: (c, u)} during convergence
         """
-        c_new = c_init 
-        dist = abs(c_new - self.kappa)
-        cs = [c_new]
+        dist = abs(c_init - self.kappa)
+        u_init = self.solver(c_init).flatten()
         iter_count = 0
+        data = dict()
+        data[iter_count] = (c_init, u_init)
 
         # perform the descent until close enough or reach max iterations
+        c_new = c_init
+        u_new = u_init
         while iter_count < max_iter and tol < dist:
+            iter_count += 1
             gradient = self.get_gradient(c_new)
             c_new -= gamma * gradient 
-            cs.append(c_new)
+            u_new = self.solver(c_new).flatten()
+            data[iter_count] = (c_new, u_new)
             dist = abs(c_new - self.kappa)
-            iter_count += 1
         if iter_count == max_iter:
             warnings.warn('Tolerance not reached. Consider changing lr')
 
-        return cs, iter_count
+        return data
+
 
     ################
     # PLOT METHODS #
     ################
+
+    def insert_boundaries(self, u):
+        x = self.domain
+        # insert left boundary condition
+        x = np.insert(x, 0, 0.)
+        u = np.insert(u, 0, self.b0, axis=1)
+        Phi = np.insert(self.Phi, 0, self.b0)
+        # append right boundary condition
+        x = np.append(x, 1.)
+        Phi = np.append(Phi, self.b1)
+        return x, u, Phi
+
+    def plot_c(self, ax, iterations, c, gamma):
+        max_its = max(iterations)
+        ax.plot(iterations, c, color='g', linewidth=3)
+        ax.set_xlabel('iterations')
+        ax.set_ylabel(r'$c$')
+        ax.hlines(self.kappa, xmin=0, xmax=max_its, 
+                     color='k', linewidth=3, linestyle='dashed')
+        ax.legend([r'$c$', r'$\kappa$'])
+        ax.set_title('Learning Rate ' + r'$\gamma = %.1f$' % gamma)
+
+    def plot_u(self, ax, u, max_its):
+        x, u, Phi = self.insert_boundaries(u)
+
+        # make plot
+        u_init = np.append(u[0], self.b1)
+        ax.plot(x, u_init, 
+                label=r'$u$', color='C0', linewidth=3)   
+        for i in range(max_its):
+            alpha_i = 1./(i+2) + 0.01
+            u_new = np.append(u[i+1], self.b1)
+            ax.plot(x, u_new, 
+                    linewidth=3, c='C0', alpha=alpha_i)
+        ax.plot(x, Phi, 
+                label=r'$\Phi$', linewidth=3, linestyle='dashed', c='k')
+        ax.set_xlabel(r'$\Omega$')
+        ax.set_ylabel(r'$u$')
+        ax.legend()
+
     def plot_gradient_descent(self, c_init, gamma, tol, max_iter=500):
         """
         Performs and plots gradient descent.
@@ -111,15 +160,23 @@ class Poisson:
             tol - acceptable distance from kappa
             max_iter - bound for number of iterations
         """
-        cs, _ = self.gradient_descent(c_init, gamma, tol, max_iter)
-        indices = [i + 1 for i in range(len(cs))]
-        fig, ax = plt.subplots(1, 1, figsize=(18,10), dpi=200)
-        ax.plot(indices, cs, linewidth=3)
-        ax.set_xlabel('Iterations')
-        ax.set_ylabel(r'$c$')
-        plt.axhline(self.kappa, c='r', linestyle='dashed')
-        plt.legend(['converging ' + r'$c$', r'$\kappa$'])
-        plt.title('Learning Rate ' + r'$\gamma = %.1f$' % gamma)
+        # do get cs and iterations from gradient descent
+        data = self.gradient_descent(c_init, gamma, tol, max_iter)
+        # unzip dictionary
+        iterations, c_and_u = zip(*sorted(data.items()))
+        max_its = max(iterations)
+
+        # build c and u for plotting
+        c = np.zeros((max_its + 1,))
+        u = np.zeros((max_its + 1, self.u_dim))
+        for i in range(max_its + 1):
+            c[i], u[i] = c_and_u[i]
+        
+        # make plots
+        fig, ax = plt.subplots(2, 1, figsize=(15, 15), dpi=200)
+        fig.subplots_adjust(hspace=0.25)
+        self.plot_c(ax[0], iterations, c, gamma) # parameter space convergence
+        self.plot_u(ax[1], u, max_its)           # solution space convergence
         plt.show()
         plt.close()
 
@@ -134,20 +191,21 @@ class Poisson:
         learning_rates = np.linspace(lr_min, lr_max, num_descents)
         data = dict()
         for lr in learning_rates:
-            _, i_count = self.gradient_descent(c_init, lr, tol, max_iter)
-            data[lr] = i_count
+            iters = self.gradient_descent(c_init, lr, tol, max_iter)
+            data[lr] = len(iters)
         lr, counts = zip(*sorted(data.items()))
         lr_opt = lr[np.argmin(counts)]
 
         # now plot the data
         fig, ax = plt.subplots(1, 1, figsize=(18,10), dpi=200)
-        ax.plot(lr, counts, linewidth=2)
+        ax.plot(lr, counts, linewidth=4, color='C1')
         ax.set_xlabel('Learning Rate ' + r'$\gamma$')
         ax.set_ylabel('iterations to convergence (%d max)' % max_iter)
         ax.set_title(r'%d iterations at $\gamma = %.2f$' 
                      % (np.min(counts), lr_opt))
         plt.show()
         plt.close()
+
 
 
 #############################
@@ -163,27 +221,30 @@ class PoissonBC(Poisson):
     """
 
     def __init__(self, theta_true, resolution=99):
-        self.theta_true = theta_true   # force term and boundary conds
-        self.T = len(theta_true)       # number of parameters
-        self.dx = 1. / resolution      # step size
-        self.U = resolution - 1        # solution interior dimension
-        Laplacian = Poisson.Laplacian  # inherit Laplacian method
-        self.Lap = self.Laplacian()   # store Laplacian
-        self.Phi = self.solver(self.theta_true) # observed data
+        self.dx = 1. / resolution          # step size
+        self.u_dim = resolution - 1            # solution interior dimension
+        self.num_params = len(theta_true)           # number of parameters
+        self.theta_true = theta_true       # force term and boundary conds
+        self.Phi = self.solver(theta_true) # observed data
+        Laplacian = Poisson.Laplacian      # inherit Laplacian method
+        self.Lap = self.Laplacian()        # store Laplacian
 
-    def solver(self, theta):
+    def solver(self, theta, boundary=False):
         """
         Computes the solution u given force parameter and boundary conds
         Acts as a proxy for the PDE solver
         """
-        x = np.linspace(self.dx, 1. - self.dx, self.U)
-        x = x.reshape((self.U, 1))
-        soln = np.zeros((self.U, 1))
-        c, b0, b1 = theta  # unpack theta
+        if boundary:
+            u_dim = self.u_dim + 2
+        else:
+            u_dim = self.u_dim 
+        x = np.linspace(self.dx, 1. - self.dx, u_dim)
+        x = x.reshape((u_dim, 1))
+        soln = np.zeros((u_dim, 1))
+        c, b0, b1 = theta              # unpack theta
         soln += -c / 2 * x ** 2        # quadratic term
         soln += (c / 2 + b1 - b0) * x  # linear term
         soln += b0                     # intercept
-
         return soln
 
     def loss_contour(self, ranges):
@@ -211,7 +272,6 @@ class PoissonBC(Poisson):
         returns a numpy array of dim = 4 with shape
                (num_c, num_b0, num_b1, loss)
         """
-        Phi = self.solver(self.theta_true)     # true solution
         num_c, num_b0, num_b1 = c_tensor.shape # number of each parameter
         num_thetas = num_c * num_b0 * num_b1   # total number of thetas
         losses = np.zeros(c_tensor.shape)             # array to store thetas
@@ -221,7 +281,7 @@ class PoissonBC(Poisson):
             b0 = b0_tensor[idx]
             b1 = b1_tensor[idx]
             u = self.solver([c, b0, b1])
-            losses[idx] = 0.5 * np.sum( (u - Phi) ** 2 )
+            losses[idx] = 0.5 * np.sum( (u - self.Phi) ** 2 )
         return losses 
 
     def get_gradient(self, theta):
@@ -242,14 +302,14 @@ class PoissonBC(Poisson):
 
         # now dJ/dtheta = -lambda* dF/dtheta - mu* dG/dtheta
         #               = (-lambda*, mu0*, mu1*)
-        dFdtheta = np.zeros((self.U, self.T))
+        dFdtheta = np.zeros((self.u_dim, self.num_params))
         dFdtheta[:,0] = 1.
 
-        dGdtheta = np.zeros((1, self.T))
+        dGdtheta = np.zeros((1, self.num_params))
         dGdtheta[:,1] = mu0
         dGdtheta[:,2] = mu1
 
-        dJdtheta = -lamb.T.dot(dFdtheta) - dGdtheta
+        dJdtheta = -lamb.T.dot(dFdtheta)*self.dx - dGdtheta
         return dJdtheta
 
     def gradient_descent(self, theta_init, gamma, tol, max_iter=500):
@@ -261,27 +321,61 @@ class PoissonBC(Poisson):
             tol - acceptable distance from kappa
             max_iter - bound for number of iterations
         """
-        theta_init = np.array(theta_init)
+        # learn the force term faster
+        gamma = gamma*np.ones(3)
+        gamma[0] = gamma[0] / self.dx  
+        # convert theta to numpy array and get L1 error
+        theta_new = np.array(theta_init.copy())
+        err = np.sum(np.abs(theta_new - self.theta_true))
+
+        # initialize descent data dictionary
         thetas = dict() # to store iterations
-        err = np.sum(np.abs(theta_init - self.theta_true)) # L1 error
         iter_count = 0 
-        thetas[iter_count] = np.array(theta_init.copy())
-        theta_new = theta_init
+        thetas[iter_count] = theta_new.copy()
 
         while iter_count < max_iter and tol < err:
             iter_count += 1
             grad = self.get_gradient(theta_new)
             theta_new -= gamma * grad.flatten()
-            thetas[iter_count] = theta_new.copy() 
             err = np.sum(np.abs(theta_new - self.theta_true))
+            thetas[iter_count] = theta_new.copy()
 
         if iter_count == max_iter:
             warnings.warn('Tolerance not reached. Consider increasing gamma')
+
         return thetas, iter_count
 
     ################
     # PLOT METHODS #
     ################
+    def plot_param_converging(self, ax, param, true_param):
+        iters = [i for i in range(len(param))]
+        ax.plot(iters, param, color='g', linewidth=3)
+        ax.hlines(true_param, 
+                  xmin=0, xmax=max(iters), 
+                  linewidth=3, color='k', linestyle='dashed')
+        ax.set_xlabel('iterations')
+
+    def plot_u_converging(self, ax, thetas):
+        x = np.linspace(0., 1., self.u_dim + 2)
+        Phi = self.solver(self.theta_true, boundary=True).flatten()
+        ax.plot(x, Phi, label=r'$\Phi$', 
+                linewidth=3, 
+                color='k', 
+                linestyle='dashed')
+        ax.set_xlabel(r'$\Omega$')
+        u_lab = r'$u$'
+        for i in range(len(thetas)):
+            u = self.solver(thetas[i,:], boundary=True).flatten()
+            alpha_i = 1./(i+1)
+            ax.plot(x, u, 
+                    label=u_lab, 
+                    linewidth=3, 
+                    color='C0', 
+                    alpha=alpha_i)
+            u_lab = ''
+        ax.legend()
+
     def plot_gradient_descent(self, theta_init, gamma, tol, max_iter=500):
         """
         Performs and plots gradient descent.
@@ -296,27 +390,29 @@ class PoissonBC(Poisson):
         theta_true_names = [r'$\kappa$', r'$\beta_0$', r'$\beta_1$']
         
         # get thetas from gradient descent
-        descent, _  = self.gradient_descent(theta_init, gamma, tol, max_iter)
-        indices, theta = zip(*sorted(descent.items()))
-        # stack thetas into array shape (num_iters, num_params)
-        num_iters = len(theta)
-        num_params = self.T 
-        thetas = np.zeros((num_iters, num_params))
-        for i in range(num_iters):
-            thetas[i] = theta[i]
+        descent, num_iters = self.gradient_descent(theta_init, gamma, tol)
+        _, thetas = zip(*sorted(descent.items()))
+        thetas = np.concatenate([t.reshape(1, self.num_params) for t in thetas])
 
-        fig, ax = plt.subplots(self.T, 1, 
-                sharex=False, figsize=(18,15), dpi=200)
-        for i in range(self.T):
-            ax[i].plot(indices, thetas[:, i], linewidth=3)
-            ax[i].hlines(self.theta_true[i], 
-                         xmin=0, xmax=max(indices), 
-                         linewidth=3, color='r', linestyle='dashed')
-            #ax[i].set_title(theta_names[i])
-            ax[i].legend([theta_names[i], theta_true_names[i]])
+        # 2x2 grid (b0, b1, \\ c, u)
+        fig, ax = plt.subplots(2, 2, figsize=(18,15), dpi=200)
+
+        # top row: b0 and b1
+        for i in range(2):
+            self.plot_param_converging(ax[0,i], 
+                                       thetas[:,i+1], 
+                                       self.theta_true[i+1])
+            ax[0,i].legend([theta_names[i+1], theta_true_names[i+1]])
+
+        # bottom row: c and u
+        self.plot_param_converging(ax[1,0], thetas[:,0], self.theta_true[0])
+        ax[1,0].legend([theta_names[0], theta_true_names[0]])
+        
+        # u plot
+        self.plot_u_converging(ax[1,1], thetas)
+
         fig.add_subplot(111, frame_on=False)
         plt.tick_params(labelcolor='none', bottom=False, left=False)
-        plt.xlabel('Iterations')
         plt.title('Learning Rate ' + r'$\gamma = %.1f$' % gamma)
         plt.show()
         plt.close()
@@ -339,7 +435,7 @@ class PoissonBC(Poisson):
 
         # now plot the data
         fig, ax = plt.subplots(1, 1, figsize=(18,10), dpi=200)
-        ax.plot(lr, counts, linewidth=2)
+        ax.plot(lr, counts, linewidth=4, color='C1')
         ax.set_xlabel('Learning Rate ' + r'$\gamma$')
         ax.set_ylabel('iterations to convergence (%d max)' % max_iter)
         ax.set_title(r'%d iterations at $\gamma = %.2f$' 
@@ -368,22 +464,21 @@ class PoissonBC(Poisson):
         indices, theta = zip(*sorted(descent.items()))
         # stack thetas into array shape (num_iters, num_params)
         num_iters = len(theta)
-        num_params = self.T 
-        thetas = np.zeros((num_iters, num_params))
-        for i in range(num_iters):
-            thetas[i] = theta[i]
+        thetas = np.array([t for t in theta])
 
-        fig, ax = plt.subplots(self.T, 1, 
+        fig, ax = plt.subplots(3, 1,
                 sharex=False, figsize=(18,18), dpi=200)
-        for i in range(self.T):
+        #flow = self.plot_curve_convergence(theta_init, gamma, tol, max_iter)
+        for i in range(self.num_params):
             j = (i + 1) % 3
-            ax[i].plot(thetas[:, i] , thetas[:, j], linewidth=3)
+            ax[i].plot(thetas[:, i] , thetas[:, j], linewidth=3, color='g')
             ax[i].scatter(self.theta_true[i], self.theta_true[j], 
                     s=15 ** 2, c='r')
             optim_name = ordered_pair(theta_true_names[i], 
                                       theta_true_names[j])
             curve_name = ordered_pair(theta_names[i], theta_names[j])
             ax[i].legend([curve_name, optim_name])
+        
         fig.add_subplot(111, frame_on=False)
         plt.tick_params(labelcolor='none', bottom=False, left=False)
         title = '%d iterations to convergence, ' % num_iters
@@ -391,12 +486,6 @@ class PoissonBC(Poisson):
         plt.title(title)
         plt.show()
         plt.close()
-
-    def plot_loss_contours(self, theta_init, gamma, tol, max_iter=500):
-        """
-        Performs gradient descent and makes pairwise contour biplots
-        """
-        pass
 
     def plot_curve_convergence(self, theta_init, gamma, tol, max_iter=500):
         """
@@ -419,26 +508,36 @@ class PoissonBC(Poisson):
         num_iters = len(theta)
         num_curves = 10 
         step_size = int(num_iters/num_curves)
-        num_params = self.T 
+        num_params = self.num_params 
         thetas = np.zeros((num_curves, num_params))
 
         fig, ax = plt.subplots(1, 1, 
                 sharex=False, figsize=(18,15), dpi=200)
 
         # make the plots
-        x = np.linspace(self.dx, 1. - self.dx, self.U)
-        Phi = self.solver(self.theta_true)
-        Phi_plt = ax.plot(x, Phi, linewidth=3, linestyle='dashed', c='black')
+        x = np.linspace(0., 1., self.u_dim + 2)
+        Phi = self.solver(self.theta_true, boundary=True)
+        ax.plot(x, Phi, 
+                linewidth=3, 
+                linestyle='dashed', 
+                c='black')
         # plot the first n curves
         for i in range(num_iters):
-            curve = self.solver(theta[i]).flatten() 
-            alpha_i = 1./(i+2) + 0.01
+            curve = self.solver(theta[i], boundary=True).flatten() 
+            alpha_i = 1./(i+1)
             ax.plot(x, curve, 
                     linewidth=3, 
                     alpha=alpha_i, 
-                    c='r')
+                    c='C0')
         plt.legend([r'$\Phi$', r'$u$'], fontsize=30)
         plt.xlabel(r'$\Omega$', fontsize=33)
         plt.ylabel(r'$u$', fontsize=33)
         plt.title('Learning Rate ' + r'$\gamma = %.1f$' % gamma)
-        return ax 
+        plt.show()
+        plt.close()
+
+    def plot_loss_contours(self, theta_init, gamma, tol, max_iter=500):
+        """
+        Performs gradient descent and makes pairwise contour biplots
+        """
+        pass
