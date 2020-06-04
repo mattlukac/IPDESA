@@ -3,6 +3,7 @@
 slurm*
 mnist*
 decoder*
+*key
 
 # directories
 .ipynb_checkpoints/
