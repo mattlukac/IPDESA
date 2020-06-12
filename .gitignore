@@ -18,3 +18,4 @@ data/*
 equations/__pycache__
 autoencoder/supervise/__pycache__
 autoencoder/__pycache__
+keynotes/

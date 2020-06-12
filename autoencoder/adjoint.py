@@ -9,7 +9,7 @@ import matplotlib.pylab as pl
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import FancyArrowPatch
 from matplotlib.colors import ListedColormap
-plt.rcParams.update({'font.size': 28,
+plt.rcParams.update({'font.size': 26,
                      'legend.handlelength': 2})
 
 
@@ -751,29 +751,15 @@ class PoissonLBC(PoissonBC):
         then plots the -log(loss) contour as a function of c and b0
         with the gradient descent path overlayed on top
         """
-        # slice parametes to fit plot
-        if not hasattr(self, 'ranges'):
-            self.ranges = ranges
+        self.ranges = ranges
         c_min, c_max, b0_min, b0_max = self.ranges
-
         contour_res = 80 
-        # compute losses if they
-        #  1) don't exist
-        #  2) have updated ranges
-        #  3) have updated resolution
-        if not hasattr(self, 'losses'):
-            self.get_tensors(ranges, contour_res)
-        elif np.ptp(self.c_tensor) != (c_max - c_min):
-            self.get_tensors(ranges, contour_res)
-        elif np.ptp(self.b0_tensor) != (b0_max - b0_min):
-            self.get_tensors(ranges, contour_res)
-        elif self.losses.shape != (contour_res, contour_res):
-            self.get_tensors(ranges, contour_res)
+        # compute losses
+        self.get_tensors(ranges, contour_res)
 
         # assign contour_c/b0 attributes, which have the first few 
         # iterations removed so video starts with params in frame
-        if not hasattr(self, 'contour_c'):
-            self.get_contour_slice()
+        self.get_contour_slice()
         c = self.contour_c[:max_iter]
         b0 = self.contour_b0[:max_iter]
 
