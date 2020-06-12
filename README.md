@@ -12,7 +12,7 @@ Unsupervised training is performed by comparing the observations with those
 produced by the network, thereby training the network to learn `theta`.
 
 ## Adjoint Poisson's Equation Gradient Descent Usage
-See `adjoint_PDE.html` for a thorough demonstration.
+See [this notebook](adjoint_PDE.html) for a thorough demonstration.
 
 ## Supervised Encoding Usage
 **Requirements:** Tensorflow 2.2 and scikit-learn 0.23.1
