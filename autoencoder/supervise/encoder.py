@@ -28,7 +28,7 @@ class Encoder(Sequential):
         self.train_data = Dataset.train
         self.val_data = Dataset.validate 
         self.test_data = Dataset.test
-        self.Theta_names = Dataset.Eqn.Theta_names
+        self.theta_names = Dataset.Eqn.theta_names
         self.predict_check = Dataset.Eqn.vectorize_u
         
         # set log directory
@@ -111,7 +111,7 @@ class Encoder(Sequential):
         for col in range(ncols):
             ax[col].scatter(y_test_trans[:,col], y_test_hat_trans[:,col], 
                     alpha=0.7)
-            ax[col].set_title(self.Theta_names[col], fontsize=22)
+            ax[col].set_title(self.theta_names[col], fontsize=22)
             ax[col].plot([0,1], [0,1], 
                     transform=ax[col].transAxes, 
                     c='r', 
@@ -132,7 +132,7 @@ class Encoder(Sequential):
         for col in range(ncols):
             ax[col].scatter(y_test[:,col], y_test_hat[:,col], 
                     alpha=0.7)
-            ax[col].set_title(self.Theta_names[col], fontsize=22)
+            ax[col].set_title(self.theta_names[col], fontsize=22)
             ax[col].plot([0,1], [0,1], 
                     transform=ax[col].transAxes, 
                     c='r',

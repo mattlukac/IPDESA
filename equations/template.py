@@ -1,13 +1,13 @@
 """
 Here is a template to configure a family of functions
-parameterized by Theta.
-Leave Theta_names empty if you do not wish to name the parameters.
+parameterized by theta.
+Leave theta_names empty if you do not wish to name the parameters.
 """
 
 import numpy as np 
 
 # NAME THE PARAMETERS
-Theta_names = []
+theta_names = []
 
 # DOMAIN
 def domain():
@@ -16,15 +16,15 @@ def domain():
     """
 
 # THETA
-def Theta(replicates):
+def theta(replicates):
     """
-    Simulates replicates of Theta
+    Simulates replicates of theta
     Output should have shape (replicates, num_params)
     """
 
 # SOLUTION
-def solution(Theta):
+def solution(theta):
     """
-    Computes the solution u given a single replicate of Theta
+    Computes the solution u given a single replicate of theta
     """
     x = domain()

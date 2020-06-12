@@ -17,16 +17,17 @@ class Equation:
         spec.loader.exec_module(eqn)
 
         # assign config functions to Equation
-        self.Theta_names = eqn.Theta_names
+        self.theta_names = eqn.theta_names
         self.domain = eqn.domain
         self.solution = eqn.solution
-        self.Theta = eqn.Theta
+        self.theta = eqn.theta
 
-    def vectorize_u(self, Thetas):
-        u = []
-        for theta in Thetas:
-            u.append(self.solution(theta))
-        return np.array(u)
+    def vectorize_u(self, thetas):
+        dom = self.domain()
+        u = np.zeros((len(thetas), len(dom)))
+        for i, theta in enumerate(thetas):
+            u[i] = self.solution(theta)
+        return u
 
     def simulate(self, replicates):
         """
@@ -34,15 +35,15 @@ class Equation:
         with size replicates and save data to a pickle
         """
         # simulate the data
-        Thetas = self.Theta(replicates)
-        u = self.vectorize_u(Thetas)
+        thetas = self.theta(replicates)
+        u = self.vectorize_u(thetas)
         
-        # Thetas must have at least one column
-        if Thetas.ndim == 1:
-            Thetas = Thetas.reshape(-1, 1)
+        # thetas must have at least one column
+        if thetas.ndim == 1:
+            thetas = thetas.reshape(-1, 1)
 
         # pickle the data
-        the_data = (u, Thetas)
+        the_data = (u, thetas)
         if not os.path.exists('data/'):
             os.mkdir('data')
         the_pickle = open('data/%s.pkl' % self.name, 'wb')

@@ -1,19 +1,19 @@
 """
 Defines the following Poisson equation problem:
-  -Laplace(u) = c    on [0,1]
-         u(0) = u_0  
-         u(1) = u_1
-            c = constant
+  -Laplacian(u) = c    on Omega=(0,1)
+           u(0) = b_0  
+           u(1) = b_1
+              c = constant
 The above formulation gives an exact solution of
-         u(x) = -(c/2)x^2 + (c/2 + u_1 - u_0)x + u_0
+           u(x) = -(c/2)x^2 + (c/2 + b_1 - b_0)x + b_0
 
-Here we have Theta = (u0, u1, c).
+Here we have theta = (c, b0, b1).
 """
 
 import numpy as np 
 
 # list for plot titles
-Theta_names = [r'$u_0$', r'$u_1$', r'$c$']
+theta_names = [r'$c$', r'$b_0$', r'$b_1$']
 
 # DOMAIN
 def domain():
@@ -24,26 +24,24 @@ def domain():
     return Omega
 
 # SOLUTION
-def solution(Theta):
+def solution(theta):
     """
-    Computes the solution u where Theta=[u0, u1, c]
+    Computes the solution u where theta=[c, b0, b1]
     """
     x = domain()
-    u0 = Theta[0]
-    u1 = Theta[1]
-    c = Theta[2]
-    u = -c * x**2 / 2 + (c/2 + u1 - u0)*x + u0
+    c, b0, b1 = theta
+    u = -c * x**2 / 2 + (c/2 + b1 - b0)*x + b0
     return u
 
 # THETA
-def Theta(replicates):
+def theta(replicates):
     """
-    Simulates replicates of Theta
+    Simulates replicates of theta
     Output has shape (replicates, numParams)
     """
-    # create replicates of Theta=[u0,u1,c]
-    u0 = np.random.uniform(-10,10, size=replicates)
-    u1 = np.random.uniform(-10,10, size=replicates)
+    # create replicates of theta=[c, b0, b1]
     c = np.random.uniform(-100,100, size=replicates)
-    Theta = np.stack((u0, u1, c), axis=1)
-    return Theta
+    b0 = np.random.uniform(-10,10, size=replicates)
+    b1 = np.random.uniform(-10,10, size=replicates)
+    theta = np.stack((c, b0, b1), axis=1)
+    return theta
