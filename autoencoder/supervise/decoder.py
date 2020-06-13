@@ -44,7 +44,8 @@ class Decoder(Layer):
 
     def call(self, inputs):
         batch_size = len(inputs)
-        outputs = tf.Variable(initial_value=tf.zeros((batch_size, self.output_dim)),
+        output_shape = (batch_size, self.output_dim)
+        outputs = tf.Variable(initial_value=tf.zeros(output_shape),
                 trainable=False)
         solns = []
         for theta in inputs:
@@ -87,11 +88,9 @@ class Decoder(Layer):
         solve(a == L, u, bc)
 
         # Compute L2 error
-        u_e = Expression('-c * x[0] * x[0] / 2.0 + (c / 2 + u1 - u0) * x[0] + u0',
-                        u0=u0,
-                        u1=u1,
-                        c=c,
-                        degree=2)
+        u_analytic = '-c * pow(x[0], 2) / 2.0'
+        u_analytic += ' + (c / 2 + u1 - u0) * x[0] + u0'
+        u_e = Expression(u_analytic, u0=u0, u1=u1, c=c, degree=2)
         #self.error_L2 = errornorm(u_e, u, 'L2')
 
         # Compute maximum error at vertices

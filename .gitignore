@@ -5,6 +5,7 @@ mnist*
 decoder*
 *key
 *png
+autoencoder/test-*
 
 # directories
 .ipynb_checkpoints/
