@@ -1,4 +1,4 @@
-from autoencoder.supervise import equation, encoder
+from Poisson import equation, encoder
 import argparse
 from tensorflow.random import set_seed
 
