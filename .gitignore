@@ -5,7 +5,6 @@ mnist*
 decoder*
 *key
 *png
-autoencoder/test-*
 
 # directories
 .ipynb_checkpoints/
@@ -20,3 +19,4 @@ equations/__pycache__
 autoencoder/supervise/__pycache__
 autoencoder/__pycache__
 keynotes/
+fenics_scripts/
