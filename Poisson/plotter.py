@@ -117,8 +117,9 @@ def solution_fit(Phi, theta_Phi, theta_from_Phi, u_from_Phi, sigma=0, seed=23):
             ax[i].plot(domain, Phi[idx[i]],
                     label=labs[2],
                     lw=3,
+                    alpha=0.5,
                     #ls='dashed',
-                    c='0.6')
+                    c='C1')
         ax[i].set_xlabel(r'$x$', fontsize=26)
         ax[i].set_xticks([0, 1])
         ax[i].set_title(title, fontsize=18)

@@ -63,16 +63,20 @@ class Encoder(Sequential):
         self.model.compile(self.optim, self.loss)
 
     ## TRAIN THE MODEL
-    def train(self, transform=False):
+    def train(self, sigma=0, transform=False):
         """
         Compiles the model, prints a summary, fits to data
         The boolean transform rescales the data if True (default),
         and uses raw data otherwise.
         """
         # load data and targets
-        Phi_train, theta_Phi_train = self.train_data 
-        Phi_val, theta_Phi_val = self.val_data 
+        Phi_train, theta_Phi_train = deepcopy(self.train_data)
+        Phi_val, theta_Phi_val = deepcopy(self.val_data)
         
+        if sigma != 0:
+            Phi_train, train_noise = plotter.add_noise(Phi_train, sigma, seed=2)
+            Phi_val, val_noise = plotter.add_noise(Phi_val, sigma, seed=3)
+
         self.transformed = transform
         if transform:
             # transform train and val inputs
@@ -164,7 +168,7 @@ class Encoder(Sequential):
         saves evaluations and predictions as class attributes
         """
         # add noise to test inputs
-        x, y = self.test_data 
+        x, y = deepcopy(self.test_data)
         self.sigma = sigma
         x, noise = plotter.add_noise(x, sigma) 
         test_data = (x, y)
