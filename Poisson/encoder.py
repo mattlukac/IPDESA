@@ -1,15 +1,16 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 from tensorflow.keras.layers import *
+from tensorflow.keras.backend import clear_session
 from tensorflow.keras.callbacks import TensorBoard, LearningRateScheduler
-from tensorflow.keras import Sequential
+from tensorflow.keras import Sequential, Model
 from sklearn import preprocessing 
 from copy import deepcopy
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime
-from . import equation
-from . import plotter
+from . import equation, plotter
+from .bootstrapper import bootstrap
 
 
 class Encoder(Sequential):
@@ -24,6 +25,8 @@ class Encoder(Sequential):
         self.callbacks = design['callbacks']
         self.batch_size = design['batch_size']
         self.epochs = design['epochs']
+        self.activations = design['unit_activations']
+        self.drops = design['dropout']
 
         # attributes from Dataset class
         self.domain = Dataset.domain()
@@ -37,20 +40,27 @@ class Encoder(Sequential):
         self.log_dir = "logs/fit/" 
         self.log_dir += datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-        # build feed forward network
-        unit_activ = design['unit_activations']
-        drops = design['dropout']
-        # construct network
-        for layer in range(self.num_layers):
-            if layer == 0:
-                self.add(Dense(
-                    units=unit_activ[layer][0],
-                    activation=unit_activ[layer][1],
-                    input_shape=self.train_data[0][0].shape))
-            else:
-                self.add(Dropout(drops[layer-1]))
-                self.add(Dense(
-                    unit_activ[layer][0], unit_activ[layer][1]))
+#    # build feed forward network
+#    def build_model(self):
+#        clear_session()
+#        # construct network
+#        for layer in range(self.num_layers):
+#            if layer == 0:
+#                self.add(Dense(
+#                    units=self.activations[layer][0],
+#                    activation=self.activations[layer][1],
+#                    input_shape=self.train_data[0][0].shape,
+#                    name='hidden'))
+#            else:
+#                self.add(Dropout(self.drops[layer-1]))
+#                self.add(Dense(
+#                    self.activations[layer][0], self.activations[layer][1]))
+    def build_model(self):
+        Phi = Input(shape=self.train_data[0][0].shape)
+        x = Dense(20, 'linear', name='hidden')(Phi)
+        theta = Dense(3, 'linear', name='theta')(x)
+        self.model = Model(Phi, theta)
+        self.model.compile(self.optim, self.loss)
 
     ## TRAIN THE MODEL
     def train(self, transform=False):
@@ -78,13 +88,12 @@ class Encoder(Sequential):
             theta_Phi_val = theta_Phi_val_tformer.fit_transform(theta_Phi_val)
 
         # compile and print summary
-        self.compile(optimizer = self.optim,
-                     loss = self.loss)
-        self.summary()
+        self.build_model()
+        self.model.summary()
 
         # make callbacks and fit model
         callbacks = self.get_callbacks()
-        self.fit(x=Phi_train, y=theta_Phi_train,
+        self.model.fit(x=Phi_train, y=theta_Phi_train,
                  validation_data=(Phi_val, theta_Phi_val), 
                  batch_size = self.batch_size,
                  epochs = self.epochs,
@@ -95,10 +104,10 @@ class Encoder(Sequential):
 # PLOTTING METHODS #
 ####################
     def theta_from_Phi(self, Phi):
-        return self.predict(Phi)
+        return self.model.predict(Phi)
 
     def u_from_Phi(self, Phi):
-        theta = self.predict(Phi)
+        theta = self.model.predict(Phi)
         return self.get_solution(theta)
 
     def plot_theta_fit(self, transform=True, sigma=0, seed=23):
@@ -112,13 +121,78 @@ class Encoder(Sequential):
     def plot_solution_fit(self, sigma=0, seed=23):
         # get Phi, theta_Phi, u_theta, theta
         Phi, theta_Phi = deepcopy(self.test_data)
-        theta = self.predict(Phi)
+        theta = self.model.predict(Phi)
         plotter.solution_fit(Phi, 
                              theta_Phi, 
                              self.theta_from_Phi, 
                              self.u_from_Phi, 
                              sigma, 
                              seed)
+
+##########################
+# BOOTSTRAP PLOT METHODS #
+##########################
+    def fitter(self, train):
+        """
+        Fits the model given some training data
+        """
+        self.build_model()
+        self.model.fit(x=train[0], y=train[1],
+                 batch_size=self.batch_size,
+                 epochs=self.epochs, 
+                 verbose=0)
+
+    def evaluater(self, test):
+        """
+        Evaluates a trained model with test data
+        """
+        test_loss = self.model.evaluate(test[0], test[1], verbose=0)
+        return test_loss
+
+    def predicter(self, test):
+        """
+        Predicts with a trained model on test data
+        """
+        return self.model.predict(test[0])
+
+    def bootstrap(self, num_boots, sigma=0, size=0.6):
+        """
+        Generates num_boots bootstrap samples,
+        fits a model to each sample,
+        evaluates the model fit on fixed test data,
+        predicts with the fixed test data,
+        saves evaluations and predictions as class attributes
+        """
+        # add noise to test inputs
+        x, y = self.test_data 
+        self.sigma = sigma
+        x, noise = plotter.add_noise(x, sigma) 
+        test_data = (x, y)
+
+        data = (self.train_data, test_data)
+        print('Bootstrapping with %d boot samples' % num_boots)
+        results = bootstrap(num_boots, 
+                data, 
+                self.fitter, 
+                self.evaluater, 
+                self.predicter,
+                size)
+        print('done')
+        self.boot_evals, self.boot_preds = results
+
+    def plot_theta_boot(self):
+        """
+        Plots bootstrap means vs true theta values
+        with 95% credible region errorbars
+        """
+        if not hasattr(self, 'boot_preds'):
+            num_boots = 500
+            self.bootstrap(num_boots)
+        plotter.theta_boot(self.test_data, self.boot_preds, self.sigma)
+
+    def plot_solution_boot():
+        pass
+
 
 #############
 # CALLBACKS #

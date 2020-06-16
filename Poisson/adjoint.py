@@ -228,7 +228,7 @@ class PoissonBC:
 # PLOTTING METHODS #
 ####################
 
-    def plot_grad_descent(self, **kwargs):
+    def plot_grad_descent(self):
         """
         Performs and plots gradient descent.
         Inputs same as self.gradient_descent():
@@ -513,9 +513,7 @@ class PoissonBC:
         x, y = idxs
 
         # make ordered pairs for legend
-        def ordered_pair(x, y):
-            pair = '(' + x + ', ' + y + ')'
-            return pair
+        ordered_pair = lambda x, y : '(' + x + ', ' + y + ')'
         curve = ordered_pair(theta_names[x], theta_names[y])
         optim = ordered_pair(theta_true_names[x], theta_true_names[y])
 
@@ -793,7 +791,7 @@ class PoissonLBC(PoissonBC):
         plt.savefig(frames_path + str(frame_num) + '.png')
         plt.close()
 
-    def contour_mp4(self, ranges):
+    def contour_mp4(self):
         """
         Save mp4 of parameters converging to optimum on contour plot
         """
@@ -919,7 +917,6 @@ class Poisson(PoissonBC):
     def plot_loss(self, c_init):
         """
         Plots loss J as a function of force parameter c
-        
         """
         # establish domain bounds from c relative to kapp
         c_minus_kappa = c_init - self.kappa

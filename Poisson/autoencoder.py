@@ -3,6 +3,7 @@ from tensorflow.random import set_seed
 from tensorflow.keras.layers import *
 from sklearn import preprocessing
 from . import equation, plotter
+from .bootstrapper import bootstrap
 from copy import deepcopy
 import numpy as np 
 import matplotlib.pyplot as plt
@@ -78,19 +79,24 @@ class AnalyticAutoEncoder:
 
         # build the network
         hidden_activation = ['linear', 'tanh']
+
+        # one hidden then latent space
         Phi = Input(shape=input_shape)
         x = Dense(20, hidden_activation[self.transformed], name='hidden')(Phi)
         theta = Dense(latent_dim, 'linear', name='theta')(x)
+        # decoder
         u = Lambda(self.decoder, name='u')(theta)
         self.model = tf.keras.Model(Phi, u)
         optimizer = tf.keras.optimizers.Adam(self.lr)
-        self.model.compile('adam', 'mse')
+        self.model.compile(optimizer, 'mse')
+
+        #self.W_init = self.model.get_weights()
 
         # model that extracts latent theta
         self.get_theta = tf.keras.Model(self.model.input, 
                 self.model.get_layer('theta').output)
 
-    def train(self, transform=False, verbose=0, seed=23):
+    def train(self, transform=False, verbose=0, sigma=0, seed=23):
         # assign training, validation, and test data
         self.transformed = transform
         if transform:
@@ -102,6 +108,11 @@ class AnalyticAutoEncoder:
             Phi_val = self.val_data[0]
             Phi_test = self.test_data[0]
 
+        # add noise to Phi
+        if sigma != 0:
+            Phi_train, train_noise = plotter.add_noise(Phi_train, sigma, seed=2)
+            Phi_val, val_noise = plotter.add_noise(Phi_val, sigma, seed=3)
+            Phi_test, test_noise = plotter.add_noise(Phi_test, sigma)
         # make the network
         set_seed(seed)
         self.build_model()
@@ -168,3 +179,42 @@ class AnalyticAutoEncoder:
     def u_from_Phi(self, Phi):
         return self.model.predict(Phi)
 
+#####################
+# BOOTSTRAP METHODS #
+#####################
+
+    def fitter(self, train):
+        #self.model.set_weights(self.W_init)
+        self.build_model()
+        self.model.fit(train[0], train[0],
+                batch_size=self.batch_size, 
+                epochs=self.batch_size, 
+                verbose=0)
+
+    def evaluater(self, test):
+        test_loss = self.model.evaluate(test[0], test[0], verbose=0)
+        return test_loss
+    
+    def predicter(self, test):
+        Phi = test[0]
+        return self.get_theta(Phi).numpy()
+
+    def bootstrap(self, num_boots, sigma=0, size=0.6):
+        x, _ = deepcopy(self.test_data)
+        self.sigma = sigma
+        x, noise = plotter.add_noise(x, self.sigma)
+        test_data = (x, _) 
+
+        data = (self.train_data, test_data)
+        print('Bootstrapping with %d boot samples' % num_boots)
+        results = bootstrap(num_boots, 
+                data,
+                self.fitter,
+                self.evaluater,
+                self.predicter,
+                size) 
+        print('done')
+        self.boot_evals, self.boot_preds = results
+
+    def plot_theta_boot(self):
+        plotter.theta_boot(self.test_data, self.boot_preds, self.sigma)
