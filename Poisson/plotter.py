@@ -31,7 +31,7 @@ def theta_fit(Phi, theta_Phi, theta_from_Phi, sigma=0, seed=23, transform=True):
     # initialize axes
     num_plots = theta_Phi.shape[1]
     fig, ax = plt.subplots(nrows=1, ncols=num_plots,
-            sharey=transform,
+            sharey=True,
             figsize=(20,10),
             dpi=200)
 
@@ -133,11 +133,11 @@ def solution_fit(Phi, theta_Phi, theta_from_Phi, u_from_Phi, sigma=0, seed=23):
 # BOOTSTRAP PLOTS #
 ###################
 
-def theta_boot(test, preds, sigmas):
+def theta_boot(test, boot_data, sigmas):
     # compute bootstrap means and confidence bounds
     test_theta = deepcopy(test[1]) # ground truth test theta
-    num_boots = len(preds)
-    boot_means, boot_ub, boot_lb, boot_errs = boot_stats(preds)
+    num_boots = len(boot_data)
+    stats = boot_stats(boot_data)
 
     # errorbar plots
     fig, ax = plt.subplots(3,1, figsize=(20,20), dpi=200)
@@ -147,11 +147,11 @@ def theta_boot(test, preds, sigmas):
     ax[0].set_title(title)
     for i in range(3):
         # plot bootstrap means
-        ax[i].scatter(test_theta[:,i], boot_means[:,i], 
+        ax[i].scatter(test_theta[:,i], stats['means'][:,i], 
                 label=param[i] + ' boot means')
         # plot bootstrap credible regions
-        ax[i].errorbar(test_theta[:,i], boot_means[:,i], 
-                yerr=boot_errs[i],
+        ax[i].errorbar(test_theta[:,i], stats['means'][:,i], 
+                yerr=stats['credint95'][i],
                 alpha=0.25,
                 fmt='|',
                 label='95% credible region')
@@ -163,24 +163,26 @@ def theta_boot(test, preds, sigmas):
     plt.show()
     plt.close()
 
-def solution_boot(test, preds, u_from_theta, sigmas):
+def solution_boot(test, boot_data, u_from_theta, sigmas):
     # compute bootstrap means and credible region
     # credible region quantiles are computed over MSE(Phi, u)
     train_sigma, test_sigma = sigmas 
     Phi, theta_Phi = deepcopy(test)
     domain = np.linspace(0, 1, Phi.shape[1])
     Phi, noise = add_noise(Phi, test_sigma) # noisy test inputs
-    num_boots = len(preds)
-    boot_means, boot_ub, boot_lb, boot_errs = boot_stats(preds)
+    num_boots = len(boot_data)
+    stats = boot_stats(boot_data)
 
     # generate sample
     num_plots = 9
     sample_idx = np.random.randint(0, len(Phi)-1, num_plots)
     Phi = Phi[sample_idx]
     noise = noise[sample_idx]
-    u_mean = u_from_theta(boot_means[sample_idx])
-    u_ub = u_from_theta(boot_ub[sample_idx])
-    u_lb = u_from_theta(boot_lb[sample_idx])
+    means = u_from_theta(stats['means'][sample_idx])
+    upper95 = u_from_theta(stats['upper95'][sample_idx])
+    lower95 = u_from_theta(stats['lower95'][sample_idx])
+    upper68 = u_from_theta(stats['upper68'][sample_idx])
+    lower68 = u_from_theta(stats['lower68'][sample_idx])
 
     # for indexing plot grid
     idx = np.array([x for x in range(num_plots)]).reshape(3, 3)
@@ -195,18 +197,25 @@ def solution_boot(test, preds, u_from_theta, sigmas):
                            dpi=200)
     labs = [r'$u_\theta$ boot mean', 
             '95% credible region', 
+            '68% credible region',
             r'$\Phi$', 
             r'$\Phi +$noise']
     for i in np.ndindex(3, 3):
         # plot u
-        ax[i].plot(domain, u_mean[idx[i]], label=labs[0], lw=3)
-        ax[i].fill_between(domain, u_lb[idx[i]], u_ub[idx[i]], 
+        ax[i].plot(domain, means[idx[i]], label=labs[0], lw=3)
+        # 95% credible interval
+        ax[i].fill_between(domain, lower95[idx[i]], upper95[idx[i]], 
+                color='C0', 
+                alpha=0.12,
+                label=labs[1])
+        # 68% credible interal
+        ax[i].fill_between(domain, lower68[idx[i]], upper68[idx[i]], 
                 color='C0', 
                 alpha=0.25,
-                label=labs[1])
+                label=labs[2])
         # plot denoised Phi
         ax[i].plot(domain, Phi[idx[i]] - noise[idx[i]],
-                label=labs[2],
+                label=labs[3],
                 lw=3,
                 ls='dashed',
                 alpha=1.0,
@@ -214,7 +223,7 @@ def solution_boot(test, preds, u_from_theta, sigmas):
         # plot noisy Phi
         if test_sigma != 0: 
             ax[i].plot(domain, Phi[idx[i]],
-                    label=labs[3],
+                    label=labs[4],
                     lw=3,
                     alpha=0.2,
                     c='k')
@@ -232,9 +241,9 @@ def solution_boot(test, preds, u_from_theta, sigmas):
     # legend 
     handles, labels = ax[0,0].get_legend_handles_labels()
     if test_sigma != 0:
-        new_order = [0,3,1,2]
+        new_order = [0,3,4,1,2]
     else:
-        new_order = [0,2,1]
+        new_order = [0,2,3,1]
     handles = [handles[i] for i in new_order]
     labels = [labels[i] for i in new_order]
     fig.legend(handles, labels, 
@@ -251,25 +260,32 @@ def solution_boot(test, preds, u_from_theta, sigmas):
 # HELPER FUNCTIONS #
 ####################
 
-def boot_stats(preds):
+def boot_stats(boot_data):
     # compute means and quantiles 
-    _, results = zip(*preds.items())
-    preds = np.array(results)
-    boot_means = np.mean(preds, axis=0)
-    boot_ub = np.quantile(preds, 0.975, axis=0)
-    boot_lb = np.quantile(preds, 0.025, axis=0)
+    _, results = zip(*boot_data.items())
+    boot_data = np.array(results)
+    stats = dict()
+    stats['means'] = np.mean(boot_data, axis=0)
+    stats['upper95'] = np.quantile(boot_data, 0.975, axis=0)
+    stats['upper68'] = np.quantile(boot_data, 0.84, axis=0)
+    stats['lower68'] = np.quantile(boot_data, 0.16, axis=0)
+    stats['lower95'] = np.quantile(boot_data, 0.025, axis=0)
 
     # make errorbars
-    num_points = preds.shape[1]
+    num_points = boot_data.shape[1]
     err_shape = (2, num_points)
-    boot_errs = [np.zeros(err_shape),
+    stats['credint95'] = [np.zeros(err_shape),
                  np.zeros(err_shape),
                  np.zeros(err_shape)]
-    for i in range(3):
-        boot_errs[i][0] = boot_ub[:,i] - boot_means[:,i]
-        boot_errs[i][1] = boot_means[:,i] - boot_lb[:,i]
+    stats['credint68'] = deepcopy(stats['credint95'])
 
-    return boot_means, boot_ub, boot_lb, boot_errs
+    for i in range(3):
+        stats['credint95'][i][0] = stats['upper95'][:,i] - stats['means'][:,i]
+        stats['credint95'][i][1] = stats['means'][:,i] - stats['lower95'][:,i]
+        stats['credint68'][i][0] = stats['upper68'][:,i] - stats['means'][:,i]
+        stats['credint68'][i][1] = stats['means'][:,i] - stats['lower68'][:,i]
+
+    return stats
 
 def add_noise(x, sigma, seed=23):
     """

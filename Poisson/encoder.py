@@ -13,7 +13,7 @@ from .bootstrapper import bootstrap
 
 class Encoder:
 
-    def __init__(self, design, Dataset):
+    def __init__(self, design):
 
         # attributes defined in design dictionary
         self.num_layers = len(design['unit_activations'])
@@ -26,12 +26,14 @@ class Encoder:
         self.drops = design['dropout']
 
         # attributes from Dataset class
-        self.domain = Dataset.domain()
-        self.train_data = Dataset.train
-        self.val_data = Dataset.validate 
-        self.test_data = Dataset.test
-        self.theta_names = Dataset.theta_names
-        self.get_solution = Dataset.vectorize_u
+        dataset = equation.Dataset('poisson')
+        dataset.load()
+        self.domain = dataset.domain()
+        self.train_data = dataset.train
+        self.val_data = dataset.validate 
+        self.test_data = dataset.test
+        self.theta_names = dataset.theta_names
+        self.get_solution = dataset.vectorize_u
         
         # set log directory
         self.log_dir = "logs/fit/" 
@@ -119,11 +121,12 @@ class Encoder:
 
     def plot_theta_fit(self, sigma=0, seed=23, transform=True):
         Phi, theta_Phi = deepcopy(self.test_data)
-        plotter.theta_fit(Phi, theta_Phi, 
+        plotter.theta_fit(Phi, 
+                          theta_Phi, 
                           self.theta_from_Phi, 
-                          transform, 
                           sigma, 
-                          seed)
+                          seed,
+                          transform)
 
     def plot_solution_fit(self, sigma=0, seed=23):
         # get Phi, theta_Phi, theta
@@ -201,7 +204,9 @@ class Encoder:
         Plots bootstrap means vs true theta values
         with 95% credible region errorbars
         """
-        plotter.theta_boot(self.test_data, self.boot_preds, self.test_sigma)
+        plotter.theta_boot(self.test_data, 
+                self.boot_preds, 
+                [self.train_sigma, self.test_sigma])
 
     def plot_solution_boot(self):
         """
