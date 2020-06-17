@@ -2,8 +2,7 @@ import numpy as np
 import pickle
 import importlib
 import os
-import matplotlib.pyplot as plt 
-plt.rcParams.update({'font.size': 22})
+from . import plotter
 
 
 class Dataset:
@@ -32,26 +31,7 @@ class Dataset:
         theta_sample = self.theta(sample_size)
         u_sample = self.vectorize_u(theta_sample)
 
-        theta_names = tuple(self.theta_names)
-        num_plots = len(u_sample)
-        commas = [',  ', ',  ', '']
-        fig, ax = plt.subplots(nrows=1, ncols=num_plots,
-                               figsize=(20,10),
-                               dpi=200)
-        for i in range(num_plots):
-            title = ''
-            for j, name in enumerate(self.theta_names):
-                title += r'%s' % name
-                title += r'$= %.2f$' % theta_sample[i,j]
-                title += commas[j]
-            ax[i].plot(domain, u_sample[i], linewidth=3)
-            ax[i].set_xlabel(r'$x$', fontsize=30)
-            ax[i].set_xticks([0, 1])
-            ax[i].set_title(title)
-        ax[0].set_ylabel(r'$u_\theta = u(x)$', fontsize=30)
-
-        plt.show()
-        plt.close()
+        plotter.solution(domain, u_sample, theta_sample)
 
     def vectorize_u(self, thetas):
         dom = self.domain()

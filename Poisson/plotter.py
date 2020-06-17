@@ -1,10 +1,34 @@
 import numpy as np
 from copy import deepcopy
-import matplotlib.pyplot as plt
 from sklearn import preprocessing
+import matplotlib.pyplot as plt
 plt.rcParams['font.size'] = 26
-hfont = {'fontname':'Helvetica'}
+plt.rcParams['figure.dpi'] = 200
+plt.style.use(['seaborn-bright'])
 
+
+##################
+# PLOT SOLUTIONS #
+##################
+
+def solution(domain, solution, theta):
+    num_plots = len(solution)
+    commas = [', ', ', ', r'$)$']
+    fig, ax = plt.subplots(1, num_plots, figsize=(20,10))
+    for i in range(num_plots):
+        title = r'$\theta = ($'
+        for j in range(theta.shape[1]):
+            #title += '%s' % name
+            title += r'$%.2f$' % theta[i,j] 
+            title += commas[j]
+        ax[i].plot(domain, solution[i], linewidth=3)
+        ax[i].set_xlabel(r'$x$', fontsize=30)
+        ax[i].set_xticks([0,1])
+        ax[i].set_title(title, fontsize=28)
+    ax[0].set_ylabel(r'$u_\theta = u(x)$', fontsize=30)
+
+    plt.show()
+    plt.close()
 
 ##################
 # PLOT MODEL FIT # 
@@ -32,8 +56,7 @@ def theta_fit(Phi, theta_Phi, theta_from_Phi, sigma=0, seed=23, transform=True):
     num_plots = theta_Phi.shape[1]
     fig, ax = plt.subplots(nrows=1, ncols=num_plots,
             sharey=True,
-            figsize=(20,10),
-            dpi=200)
+            figsize=(20,10))
 
     # plot transformed thetas
     if transform:
@@ -100,8 +123,7 @@ def solution_fit(Phi, theta_Phi, theta_from_Phi, u_from_Phi, sigma=0, seed=23):
 
     fig, ax = plt.subplots(nrows=3, ncols=3,
                            sharex=True,
-                           figsize=(20,20),
-                           dpi=200)
+                           figsize=(20,20))
     labs = [r'$u_\theta$', r'$\Phi$', r'$\Phi +$noise']
     for i in np.ndindex(3, 3):
         # plot reconstructed Phi
@@ -125,9 +147,9 @@ def solution_fit(Phi, theta_Phi, theta_from_Phi, u_from_Phi, sigma=0, seed=23):
         labs = ['' for lab in labs] # don't label other plots
     cols = 3 if sigma != 0 else 2
     fig.legend(fontsize=26, loc='upper center', shadow=True, ncol=cols)
+
     plt.show()
     plt.close()
-
 
 ###################
 # BOOTSTRAP PLOTS #
@@ -140,7 +162,7 @@ def theta_boot(test, boot_data, sigmas):
     stats = boot_stats(boot_data)
 
     # errorbar plots
-    fig, ax = plt.subplots(3,1, figsize=(20,20), dpi=200)
+    fig, ax = plt.subplots(3,1, figsize=(20,20))
     param = [r'$c$', r'$b_0$', r'$b_1$']
     train_sigma, test_sigma = sigmas
     title = noise_title(train_sigma, test_sigma)
@@ -193,8 +215,7 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
     # title should say how much noise was added
     fig, ax = plt.subplots(nrows=3, ncols=3,
                            sharex=True,
-                           figsize=(20,20),
-                           dpi=200)
+                           figsize=(20,20))
     labs = [r'$u_\theta$ boot mean', 
             '95% credible region', 
             '68% credible region',
@@ -320,7 +341,7 @@ def identity(ax):
     """ Plot the identity map y=x """
     x = np.array(ax.get_xlim())
     y = x 
-    ax.plot(x, y, c='r', lw=3)
+    ax.plot(x, y, c='r', lw=3, alpha=0.5)
 
 def noise_title(train_sigma, test_sigma):
     title = ''
