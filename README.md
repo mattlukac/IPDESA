@@ -11,7 +11,9 @@ then FEniCS decodes `theta` to reproduce the observations according to the PDE m
 Unsupervised training is performed by comparing the observations with those 
 produced by the network, thereby training the network to learn `theta`.
 
-<img src="neural_assisted_descent.png" width="700" align="center" >
+<p class="aligncenter">
+    <img src="neural_assisted_descent.png" width="700" alt="centered image" />
+</p>
 
 ## Adjoint Poisson's Equation Gradient Descent Usage
 See [this notebook](adjoint_PDE.html) for a thorough demonstration.
