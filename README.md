@@ -17,6 +17,8 @@ See [this notebook](adjoint_PDE.html) for a thorough demonstration.
 ## Supervised Encoding Usage
 **Requirements:** Tensorflow 2.2 and scikit-learn 0.23.1
 
+See [this notebook](poisson_encoder.html) for a demonstration.
+
 The `equations/` directory contains some example config files.
 There are four requirements for the config files:
  1. `theta_names` is a list of strings representing names for each parameter in `theta`
