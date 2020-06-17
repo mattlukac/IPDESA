@@ -12,7 +12,7 @@ Unsupervised training is performed by comparing the observations with those
 produced by the network, thereby training the network to learn `theta`.
 
 <p align="center">
-  <img src="neural_assisted_descent.png" width="700">
+  <img src="neural_assisted_descent.png" width="600">
 </p>
 
 ## Adjoint Poisson's Equation Gradient Descent Usage
