@@ -6,16 +6,16 @@ from . import equation, plotter
 from .bootstrapper import bootstrap
 from copy import deepcopy
 import numpy as np 
-import matplotlib.pyplot as plt
-plt.rcParams.update({'font.size': 26})
 
 
 class AnalyticAutoEncoder:
 
     def __init__(self, epochs=20, batch_size=25, lr=0.001):
+        # model attributes
         self.epochs = epochs 
         self.batch_size = batch_size
         self.lr = lr
+        self.optimizer = tf.keras.optimizers.Adam(lr)
         
         # load data
         data = equation.Dataset('poisson')
@@ -24,34 +24,10 @@ class AnalyticAutoEncoder:
         self.train_data = data.train
         self.val_data = data.validate
         self.test_data = data.test 
-
-        Phi_train, theta_train = data.train
-        Phi_val, theta_val = data.validate
-        Phi_test, theta_test = data.test
-        
-        # data probably shouldn't be rescaled to interpret theta, but hey
-        # maxabs scalers
-        Phi_train_tformer = preprocessing.MaxAbsScaler()
-        theta_train_tformer = preprocessing.MaxAbsScaler()
-        Phi_val_tformer = preprocessing.MaxAbsScaler()
-        theta_val_tformer = preprocessing.MaxAbsScaler()
-        Phi_test_tformer = preprocessing.MaxAbsScaler()
-        theta_test_tformer = preprocessing.MaxAbsScaler()
-
-        # rescale data
-        Phi_train_trans = Phi_train_tformer.fit_transform(Phi_train)
-        theta_train_trans = theta_train_tformer.fit_transform(theta_train)
-        Phi_val_trans = Phi_val_tformer.fit_transform(Phi_val)
-        theta_val_trans = theta_val_tformer.fit_transform(theta_val)
-        Phi_test_trans = Phi_test_tformer.fit_transform(Phi_test)
-        theta_test_trans = theta_test_tformer.fit_transform(theta_test)
-
-        # transformed data attributes
-        self.train_data_tform = (Phi_train_trans, theta_train_trans)
-        self.val_data_tform = (Phi_val_trans, theta_val_trans)
-        self.test_data_tform = (Phi_test_trans, theta_test_trans)
+        self.get_solution = data.vectorize_u
 
     def decoder(self, theta):
+        """ Tensor operations to calculate analytic solution """
         c, b0, b1 = tf.split(theta, 3, axis=1)
         # x and x^2
         x = np.linspace(0., 1., 100)
@@ -70,100 +46,72 @@ class AnalyticAutoEncoder:
         return u
 
     def build_model(self):
+        """ Builds autoencoder and method to extract latent theta """
         # use eager tensors
         tf.config.experimental_run_functions_eagerly(True)
 
-        # network paramters 
-        latent_dim = 3
-        input_shape = (100,)
+        # network parameters 
+        input_shape = self.train_data[0].shape[1]
+        latent_dim = self.train_data[1].shape[1]
 
-        # build the network
-        hidden_activation = ['linear', 'tanh']
-
-        # one hidden then latent space
+        # encoder and decoder
         Phi = Input(shape=input_shape)
-        x = Dense(20, hidden_activation[self.transformed], name='hidden')(Phi)
+        x = Dense(20, 'linear', name='hidden')(Phi)
         theta = Dense(latent_dim, 'linear', name='theta')(x)
-        # decoder
         u = Lambda(self.decoder, name='u')(theta)
-        self.model = tf.keras.Model(Phi, u)
-        optimizer = tf.keras.optimizers.Adam(self.lr)
-        self.model.compile(optimizer, 'mse')
 
-        #self.W_init = self.model.get_weights()
+        # build model
+        self.model = tf.keras.Model(Phi, u)
+        self.model.compile(self.optimizer, 'mse')
 
         # model that extracts latent theta
         self.get_theta = tf.keras.Model(self.model.input, 
                 self.model.get_layer('theta').output)
 
-    def train(self, transform=False, verbose=0, sigma=0, seed=23):
-        # assign training, validation, and test data
-        self.transformed = transform
-        if transform:
-            Phi_train = self.train_data_tform[0]
-            Phi_val = self.val_data_tform[0]
-            Phi_test = self.test_data_tform[0]
-        else:
-            Phi_train = self.train_data[0]
-            Phi_val = self.val_data[0]
-            Phi_test = self.test_data[0]
+    def train(self, sigma=0, seed=23, verbose=0):
+        # add noise to data
+        train_data = self.noisify(self.train_data, sigma, seed=2)
+        val_data = self.noisify(self.val_data, sigma, seed=3)
+        test_data = self.noisify(self.test_data, sigma)
 
-        # add noise to Phi
-        if sigma != 0:
-            Phi_train, train_noise = plotter.add_noise(Phi_train, sigma, seed=2)
-            Phi_val, val_noise = plotter.add_noise(Phi_val, sigma, seed=3)
-            Phi_test, test_noise = plotter.add_noise(Phi_test, sigma)
         # make the network
         set_seed(seed)
         self.build_model()
 
         # train and print losses
         print('training...')
-        self.model.fit(x=Phi_train, y=Phi_train,
-                       validation_data=(Phi_val, Phi_val),
+        self.model.fit(x=train_data[0], y=train_data[0],
+                       validation_data=(val_data[0], val_data[0]),
                        epochs=self.epochs,
                        batch_size=self.batch_size,
                        verbose=verbose)
         print('--------')
         print('Reconstructed Phi MSE')
         print('Training:', 
-                self.model.evaluate(Phi_train, Phi_train, verbose=0))
+                self.model.evaluate(train_data[0], train_data[0], verbose=0))
         print('Validation:',
-                self.model.evaluate(Phi_val, Phi_val, verbose=0))
+                self.model.evaluate(val_data[0], val_data[0], verbose=0))
         print('Test:',
-                self.model.evaluate(Phi_test, Phi_test, verbose=0))
+                self.model.evaluate(test_data[0], test_data[0], verbose=0))
         
         # extract latent space theta and compute MSE
-        theta_test = self.get_theta(Phi_test).numpy()
-        theta_test_mse = np.mean((theta_test - self.test_data[1]) ** 2, axis=0)
+        theta_test = self.theta_from_Phi(test_data[0])
+        theta_test_mse = np.mean((theta_test - test_data[1]) ** 2, axis=0)
         print('--------')
         print('Latent theta MSE:', theta_test_mse)
-
-    def test_noise(self, sigma=0.0):
-        Phi_test, theta_test  = self.test_data
-        noise = np.random.randn(Phi_test.size).reshape(400, 100)
-        noise = np.reshape(noise, Phi_test.shape)
-        Phi_test_noisy = Phi_test + sigma * noise
-        print('Reconstructed Noisy Phi MSE:', 
-                self.model.evaluate(Phi_test_noisy, Phi_test_noisy, 
-                    verbose=0))
-        u_test_noisy = self.model.predict(Phi_test_noisy)
-        noisy_theta_test = self.get_theta(Phi_test_noisy).numpy()
-        noisy_theta_mse = np.mean((theta_test - noisy_theta_test))
-        print('Noisy theta MSE:', noisy_theta_mse)
 
 
 ################
 # PLOT METHODS #
 ################
 
-    def plot_theta_fit(self, transform=True, sigma=0, seed=23):
+    def plot_theta_fit(self, sigma=0, seed=23, transform=True):
         Phi, theta_Phi = deepcopy(self.test_data)
         plotter.theta_fit(Phi, theta_Phi,
                           self.theta_from_Phi,
-                          transform,
                           sigma,
-                          seed)
+                          seed,
+                          transform)
 
     def plot_solution_fit(self, sigma=0, seed=23):
         # get Phi, theta_Phi, theta
@@ -173,18 +121,12 @@ class AnalyticAutoEncoder:
                              self.u_from_Phi,
                              sigma, seed)
         
-    def theta_from_Phi(self, Phi):
-        return self.get_theta(Phi).numpy()
-
-    def u_from_Phi(self, Phi):
-        return self.model.predict(Phi)
-
 #####################
 # BOOTSTRAP METHODS #
 #####################
 
     def fitter(self, train):
-        #self.model.set_weights(self.W_init)
+        """ Fits the model given training data """
         self.build_model()
         self.model.fit(train[0], train[0],
                 batch_size=self.batch_size, 
@@ -192,20 +134,33 @@ class AnalyticAutoEncoder:
                 verbose=0)
 
     def evaluater(self, test):
+        """ Evaluates fitted model given test data """
         test_loss = self.model.evaluate(test[0], test[0], verbose=0)
         return test_loss
     
     def predicter(self, test):
+        """ Predicts on fitted model given test data """
         Phi = test[0]
         return self.get_theta(Phi).numpy()
 
-    def bootstrap(self, num_boots, sigma=0, size=0.6):
-        x, _ = deepcopy(self.test_data)
-        self.sigma = sigma
-        x, noise = plotter.add_noise(x, self.sigma)
-        test_data = (x, _) 
+    def bootstrap(self, num_boots, train_sigma=0, test_sigma=0, size=0.6):
+        """
+        Performs num_boots bootstrap iterations 
+        with sample 60% of original size
+        Train on noisy data with stdev train_sigma
+        Test on noisy data with stdev test_sigma
+        """
+        # add noise to train inputs
+        train_data = self.noisify(self.train_data, train_sigma, seed=2)
 
-        data = (self.train_data, test_data)
+        # add noise to test inputs
+        test_data = self.noisify(self.test_data, test_sigma)
+
+        # save noisy data and sigmas
+        data = (train_data, test_data)
+        self.train_sigma = train_sigma
+        self.test_sigma = test_sigma
+
         print('Bootstrapping with %d boot samples' % num_boots)
         results = bootstrap(num_boots, 
                 data,
@@ -217,4 +172,64 @@ class AnalyticAutoEncoder:
         self.boot_evals, self.boot_preds = results
 
     def plot_theta_boot(self):
-        plotter.theta_boot(self.test_data, self.boot_preds, self.sigma)
+        """
+        Plots predicted vs true thetas from bootstrapping results
+        Inputs to theta_boot():
+          self.test_data - used for ground truth thetas
+          self.boot_preds - bootstrap results, has noise info built in
+          sigmas - purely for the title of the plot
+        """
+        plotter.theta_boot(self.test_data, 
+                self.boot_preds, 
+                [self.train_sigma, self.test_sigma])
+
+    def plot_solution_boot(self):
+        """
+        Plots true solution curves with bootstrap credible regions
+        Inputs to solution_boot():
+          self.test_data - ground truth information
+          self.boot_preds - contains bootstrap results
+          self.u_from_theta - reconstructed Phi given theta
+          sigmas - used in plot title
+        """
+        plotter.solution_boot(self.test_data, 
+                self.boot_preds, 
+                self.u_from_theta,
+                [self.train_sigma, self.test_sigma])
+
+################
+# MISC METHODS #
+################
+
+    def theta_from_Phi(self, Phi):
+        """ Predict theta given Phi """
+        return self.get_theta(Phi).numpy()
+
+    def u_from_Phi(self, Phi):
+        """ Predicts u_theta given Phi """
+        return self.model.predict(Phi)
+
+    def u_from_theta(self, theta):
+        """ Reconstructs Phi given theta """
+        return self.get_solution(theta)
+
+    def noisify(self, data, sigma, seed=23):
+        """ Add noise to input of data """
+        x, y = deepcopy(data)
+        x, noise = plotter.add_noise(x, sigma, seed)
+        data_with_noise = (x, y)
+        return data_with_noise
+
+    def mse_from_Phi(self, sigma=0):
+        """ Prints MSE from reconstructed Phi and latent theta """
+        # compute u mse
+        test_data = self.noisify(self.test_data, sigma)
+        u_theta = self.u_from_Phi(test_data[0])
+        u_mse = np.mean((u_theta - test_data[0]) ** 2)
+        print('Reconstructed Noisy Phi MSE:', u_mse)
+
+        # compute latent theta mse
+        theta = self.theta_from_Phi(test_data[0])
+        theta_mse = np.mean((test_data[1] - theta) ** 2, axis=0)
+        print('Noisy theta MSE:', theta_mse)
+

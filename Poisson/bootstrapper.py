@@ -18,7 +18,6 @@ def sample(train_data, size=0.6):
     train_idx = np.random.choice(num_inputs, train_size) 
     train_samp = (train_data[0][train_idx], train_data[1][train_idx])
 
-    print('sampled training set with %d inputs' % train_size)
     return train_samp
 
 def fit_eval_predict(data, fit, evaluate, predict):
@@ -34,7 +33,7 @@ def fit_eval_predict(data, fit, evaluate, predict):
     test_predictions = predict(test)
     return test_loss, test_predictions 
 
-def bootstrap(boots, data, fit, evaluate, predict, size=0.6):
+def bootstrap(boots, data, fit, evaluate, predict, size=0.6, verbose=False):
     """
     for each boot: sample data, fit, evaluate, predict with model
     the input data is a tuple (train, test) where train and test
@@ -45,8 +44,12 @@ def bootstrap(boots, data, fit, evaluate, predict, size=0.6):
     evals = np.zeros((boots,))
     preds = dict()
     for b in range(boots):
-        print('Bootstrap iteration %d out of %d' % (b+1, boots))
         train_boot = sample(train, size)
+        if verbose:
+            samp_size = train_boot[0].shape[0]
+            message = 'iteration %d out of %d' % (b+1, boots)
+            message += ' with %d in the bag samples' % samp_size
+            print(message)
         boot_data = (train_boot, test)
         boot_eval, boot_pred = fit_eval_predict(boot_data, 
                 fit, 

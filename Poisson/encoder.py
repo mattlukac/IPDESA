@@ -1,22 +1,19 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 from tensorflow.keras.layers import *
-from tensorflow.keras.backend import clear_session
+from tensorflow.keras import Model
 from tensorflow.keras.callbacks import TensorBoard, LearningRateScheduler
-from tensorflow.keras import Sequential, Model
 from sklearn import preprocessing 
 from copy import deepcopy
 import numpy as np
-import matplotlib.pyplot as plt
 import datetime
 from . import equation, plotter
 from .bootstrapper import bootstrap
 
 
-class Encoder(Sequential):
+class Encoder:
 
     def __init__(self, design, Dataset):
-        super(Encoder, self).__init__()
 
         # attributes defined in design dictionary
         self.num_layers = len(design['unit_activations'])
@@ -40,42 +37,45 @@ class Encoder(Sequential):
         self.log_dir = "logs/fit/" 
         self.log_dir += datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-#    # build feed forward network
-#    def build_model(self):
-#        clear_session()
-#        # construct network
-#        for layer in range(self.num_layers):
-#            if layer == 0:
-#                self.add(Dense(
-#                    units=self.activations[layer][0],
-#                    activation=self.activations[layer][1],
-#                    input_shape=self.train_data[0][0].shape,
-#                    name='hidden'))
-#            else:
-#                self.add(Dropout(self.drops[layer-1]))
-#                self.add(Dense(
-#                    self.activations[layer][0], self.activations[layer][1]))
+    # build feed forward network
     def build_model(self):
-        Phi = Input(shape=self.train_data[0][0].shape)
-        x = Dense(20, 'linear', name='hidden')(Phi)
-        theta = Dense(3, 'linear', name='theta')(x)
+        # input Phi
+        Phi = Input(shape=self.train_data[0][0].shape, name='Phi')
+        for layer in range(self.num_layers):
+            # first hidden layer
+            if layer == 0:
+                x = Dense(self.activations[layer][0],
+                        self.activations[layer][1])(Phi)
+            # other hidden layers
+            elif layer < self.num_layers - 1:
+                x = Dropout(self.drops[layer-1])(x)
+                x = Dense(self.activations[layer][0],
+                        self.activations[layer][1])(x)
+            # final layer
+            else:
+                theta = Dense(self.activations[layer][0],
+                        self.activations[layer][1],
+                        name='theta')(x)
+
         self.model = Model(Phi, theta)
         self.model.compile(self.optim, self.loss)
 
     ## TRAIN THE MODEL
-    def train(self, sigma=0, transform=False):
+    def train(self, verbose=0, sigma=0, transform=False):
         """
         Compiles the model, prints a summary, fits to data
         The boolean transform rescales the data if True (default),
         and uses raw data otherwise.
+
+        The input sigma controls the noise for the train/val inputs
         """
         # load data and targets
         Phi_train, theta_Phi_train = deepcopy(self.train_data)
         Phi_val, theta_Phi_val = deepcopy(self.val_data)
         
-        if sigma != 0:
-            Phi_train, train_noise = plotter.add_noise(Phi_train, sigma, seed=2)
-            Phi_val, val_noise = plotter.add_noise(Phi_val, sigma, seed=3)
+        # add noise
+        Phi_train, train_noise = plotter.add_noise(Phi_train, sigma, seed=2)
+        Phi_val, val_noise = plotter.add_noise(Phi_val, sigma, seed=3)
 
         self.transformed = transform
         if transform:
@@ -102,7 +102,7 @@ class Encoder(Sequential):
                  batch_size = self.batch_size,
                  epochs = self.epochs,
                  callbacks = callbacks,
-                 verbose=2)
+                 verbose=verbose)
         
 ####################
 # PLOTTING METHODS #
@@ -114,7 +114,10 @@ class Encoder(Sequential):
         theta = self.model.predict(Phi)
         return self.get_solution(theta)
 
-    def plot_theta_fit(self, transform=True, sigma=0, seed=23):
+    def u_from_theta(self, theta):
+        return self.get_solution(theta)
+
+    def plot_theta_fit(self, sigma=0, seed=23, transform=True):
         Phi, theta_Phi = deepcopy(self.test_data)
         plotter.theta_fit(Phi, theta_Phi, 
                           self.theta_from_Phi, 
@@ -123,7 +126,7 @@ class Encoder(Sequential):
                           seed)
 
     def plot_solution_fit(self, sigma=0, seed=23):
-        # get Phi, theta_Phi, u_theta, theta
+        # get Phi, theta_Phi, theta
         Phi, theta_Phi = deepcopy(self.test_data)
         theta = self.model.predict(Phi)
         plotter.solution_fit(Phi, 
@@ -159,7 +162,7 @@ class Encoder(Sequential):
         """
         return self.model.predict(test[0])
 
-    def bootstrap(self, num_boots, sigma=0, size=0.6):
+    def bootstrap(self, num_boots, train_sigma=0, test_sigma=0, size=0.6):
         """
         Generates num_boots bootstrap samples,
         fits a model to each sample,
@@ -167,14 +170,23 @@ class Encoder(Sequential):
         predicts with the fixed test data,
         saves evaluations and predictions as class attributes
         """
-        # add noise to test inputs
-        x, y = deepcopy(self.test_data)
-        self.sigma = sigma
-        x, noise = plotter.add_noise(x, sigma) 
-        test_data = (x, y)
+        # add noise to train inputs
+        x_train, y_train = deepcopy(self.train_data)
+        x_train, noise = plotter.add_noise(x_train, train_sigma, seed=2)
+        train_data = (x_train, y_train)
 
-        data = (self.train_data, test_data)
-        print('Bootstrapping with %d boot samples' % num_boots)
+        # add noise to test inputs
+        x_test, y_test = deepcopy(self.test_data)
+        x_test, noise = plotter.add_noise(x_test, test_sigma) 
+        test_data = (x_test, y_test)
+
+        # save noisy data and sigmas
+        data = (train_data, test_data)
+        self.train_sigma = train_sigma
+        self.test_sigma = test_sigma
+
+        samp_size = int(size * len(x_train))
+        print('Bootstrapping with %d samples of size %d' % (num_boots, samp_size))
         results = bootstrap(num_boots, 
                 data, 
                 self.fitter, 
@@ -189,13 +201,17 @@ class Encoder(Sequential):
         Plots bootstrap means vs true theta values
         with 95% credible region errorbars
         """
-        if not hasattr(self, 'boot_preds'):
-            num_boots = 500
-            self.bootstrap(num_boots)
-        plotter.theta_boot(self.test_data, self.boot_preds, self.sigma)
+        plotter.theta_boot(self.test_data, self.boot_preds, self.test_sigma)
 
-    def plot_solution_boot():
-        pass
+    def plot_solution_boot(self):
+        """
+        Plots mean bootstrap solution curve bounded above and below
+        by the credible intervals.
+        """
+        plotter.solution_boot(self.test_data, 
+                self.boot_preds, 
+                self.u_from_theta,
+                [self.train_sigma, self.test_sigma])
 
 
 #############
