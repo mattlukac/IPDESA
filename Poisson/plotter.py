@@ -1,17 +1,125 @@
 import numpy as np
 from copy import deepcopy
 from sklearn import preprocessing
+import imageio
 import matplotlib.pyplot as plt
-plt.rcParams['font.size'] = 26
-plt.rcParams['figure.dpi'] = 200
+import matplotlib.ticker as mticker
+from matplotlib.gridspec import GridSpec
+from matplotlib.patches import FancyArrowPatch
+
+# global pyplot settings
 plt.style.use(['seaborn-bright'])
+plt.rcParams.update({'font.size' : 26,
+                     'figure.dpi' : 200,
+                     'legend.shadow' : True,
+                     'legend.handlelength' : 2})
 
 
-##################
-# PLOT SOLUTIONS #
-##################
+####################
+# HELPER FUNCTIONS #
+####################
+
+def add_noise(x, sigma, seed=23):
+    """
+    Adds Gaussian noise with stdev sigma to x
+    returns noisy x and the noise so 
+    we can denoise x later if we wish
+    """
+    np.random.seed(seed)
+    noise = np.random.randn(x.size)
+    noise = np.reshape(noise, x.shape)
+    noise *= sigma
+    return x+noise, noise
+
+def identity(ax):
+    """ Plot the identity map y=x """
+    x = np.array(ax.get_xlim())
+    y = x 
+    ax.plot(x, y, c='r', lw=3, alpha=0.5)
+
+def suptitle(fig, title):
+    """ Adds title above subplots """
+    fig.add_subplot(111, frame_on=False)
+    plt.tick_params(labelcolor='none', bottom=False, left=False)
+    plt.title(title)
+
+def noise_title(train_sigma, test_sigma):
+    """
+    Generate title showing amount of noise used 
+    during bootstrap training and testing
+    """
+    title = ''
+    if train_sigma != 0:
+        title += 'training noise'
+        title += r'$\sim\operatorname{Normal}(0,\sigma=%.1f)$' % train_sigma
+        title += '\n'
+    else:
+        title += 'no training noise\n'
+    if test_sigma != 0:
+        title += 'testing noise'
+        title += r'$\sim\operatorname{Normal}(0,\sigma=%.1f)$' % test_sigma
+    else:
+        title += 'no testing noise'
+    return title
+
+def rescale_thetas(theta_Phi, theta):
+    """
+    Rescales true and predicted thetas so the pred vs true plot
+    is bounded by -1 and 1
+    Returns rescaled theta_Phi and theta
+    """
+    # combine theta and theta_Phi to transform
+    thetas = np.hstack((theta, theta_Phi))
+    thetas_tformer = preprocessing.MaxAbsScaler()
+    thetas_tform = thetas_tformer.fit_transform(thetas)
+
+    # transformed thetas
+    theta = thetas_tform[:,:3]
+    theta_Phi = thetas_tform[:,3:]
+
+    return theta_Phi, theta
+
+def boot_stats(boot_data):
+    """
+    Given dictionary containing bootstrap data,
+    compute bootstrap means, 68%, and 95% credible regions
+    """
+    # compute means and quantiles 
+    _, results = zip(*boot_data.items())
+    boot_data = np.array(results)
+    stats = dict()
+    stats['means'] = np.mean(boot_data, axis=0)
+    stats['upper95'] = np.quantile(boot_data, 0.975, axis=0)
+    stats['upper68'] = np.quantile(boot_data, 0.84, axis=0)
+    stats['lower68'] = np.quantile(boot_data, 0.16, axis=0)
+    stats['lower95'] = np.quantile(boot_data, 0.025, axis=0)
+
+    # make errorbars
+    num_points = boot_data.shape[1]
+    err_shape = (2, num_points)
+    stats['credint95'] = [np.zeros(err_shape),
+                 np.zeros(err_shape),
+                 np.zeros(err_shape)]
+    stats['credint68'] = deepcopy(stats['credint95'])
+
+    for i in range(3):
+        stats['credint95'][i][0] = stats['upper95'][:,i] - stats['means'][:,i]
+        stats['credint95'][i][1] = stats['means'][:,i] - stats['lower95'][:,i]
+        stats['credint68'][i][0] = stats['upper68'][:,i] - stats['means'][:,i]
+        stats['credint68'][i][1] = stats['means'][:,i] - stats['lower68'][:,i]
+
+    return stats
+
+#############
+# SOLUTIONS #
+#############
 
 def solution(domain, solution, theta):
+    """
+    Plots solution(s) given domain, solution and theta
+    Solution and theta should have shapes (num_plots, soln_shape)
+    and (num_plots, theta_shape) respectively.
+    """
     num_plots = len(solution)
     commas = [', ', ', ', r'$)$']
     fig, ax = plt.subplots(1, num_plots, figsize=(20,10))
@@ -30,9 +138,9 @@ def solution(domain, solution, theta):
     plt.show()
     plt.close()
 
-##################
-# PLOT MODEL FIT # 
-##################
+#############
+# MODEL FIT # 
+#############
 
 def theta_fit(Phi, theta_Phi, theta_from_Phi, sigma=0, seed=23, transform=True):
     """
@@ -146,16 +254,18 @@ def solution_fit(Phi, theta_Phi, theta_from_Phi, u_from_Phi, sigma=0, seed=23):
         ax[i].set_xticks([0, 1])
         labs = ['' for lab in labs] # don't label other plots
     cols = 3 if sigma != 0 else 2
-    fig.legend(fontsize=26, loc='upper center', shadow=True, ncol=cols)
+    fig.legend(fontsize=26, loc='upper center', ncol=cols)
 
+    suptitle(fig, 'Test set sample')
     plt.show()
     plt.close()
 
-###################
-# BOOTSTRAP PLOTS #
-###################
+#################
+# BOOTSTRAPPING #
+#################
 
 def theta_boot(test, boot_data, sigmas):
+    """ Plot bootstrap results in parameter space """
     # compute bootstrap means and confidence bounds
     test_theta = deepcopy(test[1]) # ground truth test theta
     num_boots = len(boot_data)
@@ -180,18 +290,27 @@ def theta_boot(test, boot_data, sigmas):
         # y=x
         identity(ax[i])
         ax[i].set_ylabel('Predictions')
-        ax[i].legend(loc='upper left', fontsize=26, shadow=True)
+        ax[i].legend(loc='upper left', fontsize=26)
     ax[2].set_xlabel('Truth')
     plt.show()
     plt.close()
 
 def solution_boot(test, boot_data, u_from_theta, sigmas):
-    # compute bootstrap means and credible region
-    # credible region quantiles are computed over MSE(Phi, u)
+    """
+    Plot bootstrap results for a sample of 9 solutions
+    For each Phi in the sample, plots:
+      denoised and noisy Phi
+      bootstrap mean
+      credible regions
+    Credible regions are quantiles from theta bootstrap results
+    """
+    # make title and add noise to Phi
     train_sigma, test_sigma = sigmas 
+    title = noise_title(train_sigma, test_sigma)
     Phi, theta_Phi = deepcopy(test)
-    domain = np.linspace(0, 1, Phi.shape[1])
     Phi, noise = add_noise(Phi, test_sigma) # noisy test inputs
+
+    # get bootstrap statistics
     num_boots = len(boot_data)
     stats = boot_stats(boot_data)
 
@@ -209,10 +328,6 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
     # for indexing plot grid
     idx = np.array([x for x in range(num_plots)]).reshape(3, 3)
 
-    # for each curve Phi, we plot:
-    # denoised Phi, bootstrap mean curve, 
-    # fill between boot_ub and boot_lb solutions
-    # title should say how much noise was added
     fig, ax = plt.subplots(nrows=3, ncols=3,
                            sharex=True,
                            figsize=(20,20))
@@ -221,45 +336,48 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
             '68% credible region',
             r'$\Phi$', 
             r'$\Phi +$noise']
+    domain = np.linspace(0, 1, Phi.shape[1])
+
     for i in np.ndindex(3, 3):
-        # plot u
+        # u
         ax[i].plot(domain, means[idx[i]], label=labs[0], lw=3)
-        # 95% credible interval
+
+        # credible intervals
         ax[i].fill_between(domain, lower95[idx[i]], upper95[idx[i]], 
                 color='C0', 
                 alpha=0.12,
                 label=labs[1])
-        # 68% credible interal
         ax[i].fill_between(domain, lower68[idx[i]], upper68[idx[i]], 
                 color='C0', 
                 alpha=0.25,
                 label=labs[2])
-        # plot denoised Phi
+
+        # denoised Phi
         ax[i].plot(domain, Phi[idx[i]] - noise[idx[i]],
                 label=labs[3],
                 lw=3,
                 ls='dashed',
                 alpha=1.0,
                 c='k')
-        # plot noisy Phi
+        # noisy Phi
         if test_sigma != 0: 
             ax[i].plot(domain, Phi[idx[i]],
                     label=labs[4],
                     lw=3,
                     alpha=0.2,
                     c='k')
+
+        # label x axes
         if i[0] == 2:
             ax[i].set_xlabel(r'$x$', fontsize=26)
         ax[i].set_xticks([0, 1])
         labs = ['' for lab in labs] # don't label other plots
 
     # title
-    fig.add_subplot(111, frame_on=False)
-    plt.tick_params(labelcolor='none', bottom=False, left=False)
-    title = noise_title(train_sigma, test_sigma)
-    plt.title(title, pad=20)
+    suptitle(fig, title)
+    plt.title(pad=20)
     
-    # legend 
+    # legend in proper order
     handles, labels = ax[0,0].get_legend_handles_labels()
     if test_sigma != 0:
         new_order = [0,3,4,1,2]
@@ -270,7 +388,6 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
     fig.legend(handles, labels, 
             fontsize=26, 
             loc='upper center', 
-            shadow=True,
             ncol = len(new_order))
     
     plt.show()
@@ -278,82 +395,365 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
 
 
 ####################
-# HELPER FUNCTIONS #
+# GRADIENT DESCENT #
 ####################
 
-def boot_stats(boot_data):
-    # compute means and quantiles 
-    _, results = zip(*boot_data.items())
-    boot_data = np.array(results)
-    stats = dict()
-    stats['means'] = np.mean(boot_data, axis=0)
-    stats['upper95'] = np.quantile(boot_data, 0.975, axis=0)
-    stats['upper68'] = np.quantile(boot_data, 0.84, axis=0)
-    stats['lower68'] = np.quantile(boot_data, 0.16, axis=0)
-    stats['lower95'] = np.quantile(boot_data, 0.025, axis=0)
-
-    # make errorbars
-    num_points = boot_data.shape[1]
-    err_shape = (2, num_points)
-    stats['credint95'] = [np.zeros(err_shape),
-                 np.zeros(err_shape),
-                 np.zeros(err_shape)]
-    stats['credint68'] = deepcopy(stats['credint95'])
-
-    for i in range(3):
-        stats['credint95'][i][0] = stats['upper95'][:,i] - stats['means'][:,i]
-        stats['credint95'][i][1] = stats['means'][:,i] - stats['lower95'][:,i]
-        stats['credint68'][i][0] = stats['upper68'][:,i] - stats['means'][:,i]
-        stats['credint68'][i][1] = stats['means'][:,i] - stats['lower68'][:,i]
-
-    return stats
-
-def add_noise(x, sigma, seed=23):
+class AdjointDescent:
     """
-    Adds Gaussian noise with stdev sigma to x
-    returns noisy x and the noise so 
-    we can denoise x later if we wish
+    Plotter class for adjoint equation gradient descent.
+    Last line of AdjClass.descend() should be
+      self.plt = plotter.AdjointDescent(AdjClass)
     """
-    np.random.seed(seed)
-    noise = np.random.randn(x.size)
-    noise = np.reshape(noise, x.shape)
-    noise *= sigma
-    return x+noise, noise
 
-def rescale_thetas(theta_Phi, theta):
-    """
-    Rescales true and predicted thetas so the pred vs true plot
-    is bounded by -1 and 1
-    Returns rescaled theta_Phi and theta
-    """
-    # combine theta and theta_Phi to transform
-    thetas = np.hstack((theta, theta_Phi))
-    thetas_tformer = preprocessing.MaxAbsScaler()
-    thetas_tform = thetas_tformer.fit_transform(thetas)
+    def __init__(self, adjoint):
+        # initialized with adjoint eq grad descent class
+        self.adjoint = adjoint
+        self.theta_names = [r'$c$', r'$b_0$', r'$b_1$']
+        self.theta_Phi_names = [r'$\kappa$', r'$\beta_0$', r'$\beta_1$']
 
-    # transformed thetas
-    theta = thetas_tform[:,:3]
-    theta_Phi = thetas_tform[:,3:]
 
-    return theta_Phi, theta
+    ############
+    # SAVE MP4 #
+    ############
 
-def identity(ax):
-    """ Plot the identity map y=x """
-    x = np.array(ax.get_xlim())
-    y = x 
-    ax.plot(x, y, c='r', lw=3, alpha=0.5)
+    def save_frame(self, frame_num, frame_path):
+        """ Used at the end of any method that plots a frame to be saved """
+        plt.savefig(frame_path + str(frame_num) + '.png')
+        plt.close()
 
-def noise_title(train_sigma, test_sigma):
-    title = ''
-    if train_sigma != 0:
-        title += 'training noise'
-        title += r'$\sim\operatorname{Normal}(0,\sigma=%.1f)$' % train_sigma
-        title += '\n'
-    else:
-        title += 'no training noise\n'
-    if test_sigma != 0:
-        title += 'testing noise'
-        title += r'$\sim\operatorname{Normal}(0,\sigma=%.1f)$' % test_sigma
-    else:
-        title += 'no testing noise'
-    return title
+    def save_mp4(self, save_frame, settings):
+        """
+        Creates mp4 from collection of frames.
+          save_frame - function that saves frame to frame_path
+          settings - dictionary containing:
+            mp4_path - path (including file name) to the mp4
+            frame_path - path to directory containing frames
+            num_frames - number of frames to make
+            duration - length of video (in seconds)
+        """
+        # unpack dictionary
+        mp4_path = settings['mp4_path']
+        frame_path = settings['frame_path']
+        num_frames = settings['num_frames']
+        duration = settings['duration']
+
+        # make video
+        fps = int(num_frames / duration)
+        with imageio.get_writer(mp4_path, mode='I', fps=fps) as writer:
+            for frame in range(num_frames):
+                save_frame(frame)
+                writer.append_data(
+                        imageio.imread(
+                            frame_path + str(frame) + '.png'
+                            )
+                        )
+
+    ####################
+    # BOUNDARY CONTROL #
+    ####################
+
+    def grad_descent_bc(self):
+        """ Plots boundary control gradient descent results """
+        # get parameters
+        c, kappa = (self.adjoint.thetas[:,0], self.adjoint.theta_true[0])
+        b0, beta0 = (self.adjoint.thetas[:,1], self.adjoint.theta_true[1])
+        b1, beta1 = (self.adjoint.thetas[:,2], self.adjoint.theta_true[2])
+
+        # 2x2 grid (b0, b1, \\ c, u)
+        fig, ax = plt.subplots(2, 2, figsize=(18,15))
+
+        # plot c, b0, b1
+        self.subplot_theta_descent(ax[1,0], c, 0)
+        self.subplot_theta_descent(ax[0,0], b0, 1)
+        self.subplot_theta_descent(ax[0,1], b1, 2)
+
+        # plot solutions
+        self.subplot_solution_descent(ax[1,1])
+
+        # make title
+        title = r'%d iterations ' % max(self.adjoint.iterations)
+        title += 'at learning rate $\gamma = %.1f$' % self.adjoint.lr
+        suptitle(fig, title)
+
+        plt.show()
+        plt.close()
+
+    def subplot_theta_descent(self, ax, theta, idx):
+        """
+        Plots parameter convergence during gradient descent
+        Inputs:
+            ax - axis object for plotting
+            param - parameter to plot vs iterations
+            idx - index for true parameter (0:kappa, 1:beta0, 2:beta1)
+        """
+        theta_Phi = self.adjoint.theta_true[idx]
+        iterations = self.adjoint.iterations
+
+        # plot theta converging to theta_Phi
+        ax.plot(iterations, theta, color='g', lw=3)
+        ax.hlines(theta_Phi, 
+                xmin=0, 
+                xmax=max(iterations), 
+                lw=3, 
+                ls='dashed', 
+                color='k')
+
+        ax.set_xlabel('iterations')
+        ax.legend([self.theta_names[idx], self.theta_Phi_names[idx]])
+
+    def subplot_solution_descent(self, ax, title=''):
+        """ Plots gradient descent in solution space """
+
+        # plot solution convergence
+        u_lab = r'$u$'
+        for i, u in enumerate(self.adjoint.solutions):
+            alpha_i = 1./(i+1)
+            ax.plot(self.adjoint.x, u, 
+                    label=u_lab, 
+                    lw=3, 
+                    c='C0', 
+                    alpha=alpha_i)
+            u_lab = ''
+
+        # plot Phi without noise
+        Phi = self.adjoint.Phi - self.adjoint.noise
+        ax.plot(self.adjoint.x, Phi, 
+                label=r'$\Phi$',
+                lw=3, 
+                c='k',
+                ls='dashed')
+
+        # plot Phi with noise if exists
+        if self.adjoint.sigma != 0:
+            ax.plot(self.adjoint.x, self.adjoint.Phi, 
+                    label=r'$\Phi + $noise',
+                    lw=3, 
+                    c='0.5', 
+                    ls='dashed')
+        
+        ax.set_xlabel(r'$\Omega$')
+        ax.set_title(title)
+        ax.legend()
+
+    def curve_convergence(self):
+        """ Plots descent in solution space """
+        fig, ax = plt.subplots(1, 1, figsize=(20,15)) 
+
+        title = r'%d iterations ' % max(self.adjoint.iterations)
+        title += 'at learning rate $\gamma = %.1f$' % self.adjoint.lr
+        self.subplot_solution_descent(ax, title)
+        ax.legend(loc='upper center', ncol=2)
+
+        plt.show()
+        plt.close()
+
+    def biplot_descent_bc(self):
+        """ Plots boundary control descent in parameter space """
+        fig, ax = plt.subplots(self.adjoint.theta_dim, 1, figsize=(18,18))
+
+        for i in range(self.adjoint.theta_dim):
+            j = (i + 1) % 3
+            thetas = [self.adjoint.thetas[:,i], self.adjoint.thetas[:,j]]
+            idxs = [i, j]
+            self.biplot_theta(ax[i], thetas, idxs)
+
+        title = '%d iterations to convergence, ' % max(self.adjoint.iterations)
+        title += r'$\gamma = %.1f$' % self.adjoint.lr
+        suptitle(fig, title)
+
+        plt.show()
+        plt.close()
+
+    def biplot_theta(self, ax, thetas, idxs, title='', color='g'):
+        """
+        Plots gradient descent in parameter space with param_y vs param_x
+        Inputs:
+            ax - the axis plotting object
+            thetas - list or tuple of parameter data [param_x, param_y]
+            idxs - list or tuple of parameter indices from theta_true
+                   (0:kappa, 1:beta0, 2:beta1)
+        """
+        # make names and get true parameter
+        theta_x, theta_y = thetas
+        x, y = idxs
+
+        # make ordered pairs for legend
+        ordered_pair = lambda x, y : '(' + x + ', ' + y + ')'
+        curve = ordered_pair(self.theta_names[x], self.theta_names[y])
+        optim = ordered_pair(self.theta_Phi_names[x], self.theta_Phi_names[y])
+
+        # make the plot
+        ax.plot(theta_x, theta_y, 
+                label=curve, 
+                lw=3, 
+                c=color)
+        ax.scatter(self.adjoint.theta_true[x], self.adjoint.theta_true[y], 
+                   label=optim, 
+                   s=12 ** 2, 
+                   c='k')
+        ax.legend()
+        ax.set_title(title)
+
+    def learning_rates(self, data, max_its):
+        """
+        Plots number of iterations to convergence
+        as a function of learning rate given by lr_bounds
+        """
+        # get plotting data
+        lr, counts = zip(*data.items())
+        lr_opt = lr[np.argmin(counts)]
+
+        # plot
+        fig, ax = plt.subplots(1, 1, figsize=(18,10))
+        ax.plot(lr, counts, linewidth=5, color='C1')
+        ax.set_xlabel('Learning Rate ' + r'$\gamma$')
+        ax.set_ylabel('iterations to convergence (%d max)' % max_its)
+        ax.set_title(r'%d iterations at $\gamma = %.2f$' 
+                     % (np.min(counts), lr_opt))
+        plt.show()
+        plt.close()
+
+
+    #########################
+    # LEFT BOUNDARY CONTROL #
+    #########################
+
+    def grad_descent_lbc(self, c, kappa, b0, beta0):
+        """ Plots left boundary control gradient descent """
+        fig, ax = plt.subplots(2, 2, figsize=(15, 15), dpi=200)
+        fig.subplots_adjust(hspace=0.25)
+
+        # c, b0 convergence top row
+        self.subplot_theta_descent(ax[0,0], c, 0)
+        self.subplot_theta_descent(ax[0,1], b0, 1)
+        
+        # solution convergence bottom row
+        for ax in ax[1,:]: ax.remove()
+        gs = GridSpec(2,2)
+        soln_ax = fig.add_subplot(gs[1,:])
+        self.subplot_solution_descent(soln_ax)
+
+        # make title
+        title = r'%d iterations ' % max(self.adjoint.iterations)
+        title += 'at learning rate $\gamma = %.1f$' % self.adjoint.lr
+        suptitle(fig, title)
+
+        plt.show()
+        plt.close()
+
+    def biplot_descent_lbc(self):
+        """ Theta biplot of left boundary control grad descent """
+        fig, ax = plt.subplots(1, 1, figsize=(18,15))
+
+        # make plot
+        thetas = [self.adjoint.thetas[:,0], self.adjoint.thetas[:,1]]
+        idxs = [0, 1]
+        self.biplot_theta(ax, thetas, idxs)
+
+        # make title
+        title = '%d iterations to convergence, ' % max(self.adjoint.iterations)
+        title += r'$\gamma = %.1f$' % self.adjoint.lr
+        ax.set_title(title)
+
+        plt.show()
+        plt.close()
+
+    def loss_contour(self, c, b0, log_losses):
+        """
+        Plots the -log(loss) contour as a function of c and b0
+        with the gradient descent path overlayed on top
+        """
+        c_min, c_max, b0_min, b0_max = self.adjoint.ranges
+        lines = np.linspace(np.min(log_losses), np.max(log_losses), 20)
+        grad = self.adjoint.get_grad([c[-1], b0[-1], self.adjoint.b1])
+
+        fig, ax = plt.subplots(1, 1, figsize=(18,10))
+
+        # make contour plot
+        cont = ax.contourf(self.adjoint.c_tensor, 
+                self.adjoint.b0_tensor, 
+                log_losses, 
+                lines)
+        cbar = fig.colorbar(cont)
+        cbar.set_label(r'$-\log(\mathcal{J})$', rotation=90)
+
+        # make theta biplot
+        title = r'$\frac{d\mathcal{J}}{d\theta} = '
+        title += '(%.7f, %.7f)$' % (grad[0,0], grad[0,1])
+        self.biplot_theta(ax, [c, b0], [0, 1], title, color='r')
+
+        # make optimum point
+        ax.scatter(c[-1], b0[-1], c='r', s=10**2)
+
+        ax.set_xlim([c_min, c_max])
+        ax.set_ylim([b0_min, b0_max])
+        ax.set_xlabel(r'$c$')
+        ax.set_ylabel(r'$b_0$')
+
+    #######################
+    # NO BOUNDARY CONTROL #
+    #######################
+
+    def grad_descent(self, c, kappa):
+        """ Plots no boundary control grad descent results """
+        fig, ax = plt.subplots(2, 1, figsize=(15, 15))
+        fig.subplots_adjust(hspace=0.25)
+        self.subplot_theta_descent(ax[0], c, 0)
+        self.subplot_solution_descent(ax[1])
+
+        # make title
+        title = r'%d iterations ' % max(self.adjoint.iterations)
+        title += 'at learning rate $\gamma = %.1f$' % self.adjoint.lr
+        suptitle(fig, title)
+
+        plt.show()
+        plt.close()
+
+    def loss(self, c_init, c_range, grad_line, Jc, dJdc):
+        """ Plots loss J as a function of force parameter c """
+        fig, ax = plt.subplots(1, 1, figsize=(18, 15), dpi=200)
+
+        # plot tangent line
+        ax.plot(c_range, grad_line,
+                label=r'$gradient -\gamma \frac{d\mathcal{J}}{dc}$',
+                linewidth=5, 
+                c='r',
+                alpha=0.5)
+
+        # plot (c, J(c))
+        ax.scatter(c_init, Jc, 
+                   label=r'descending parameter $(c, \mathcal{J}(c))$',
+                   s=12**2, 
+                   c='g',
+                   zorder=2.5)
+
+        # plot gradient vector
+        dc = -self.adjoint.lr * dJdc 
+        ax.arrow(x=c_init, y=Jc, dx=dc, dy=0, 
+                #length_includes_head=True,
+                head_length=0.05,
+                color='r',
+                alpha=0.5)
+
+        # compute and plot loss
+        loss = np.zeros(c_range.shape)
+        for i, c in enumerate(c_range):
+            theta = [c, self.adjoint.b0, self.adjoint.b1]
+            loss[i] = self.adjoint.get_loss(theta)
+        loss_plot = ax.plot(c_range, loss, 
+                label=r'loss $\mathcal{J}(c)$',
+                linewidth=5, 
+                c='mediumblue')
+
+        # set labels and title
+        title = r'$\frac{d\mathcal{J}}{dc} = %.7f$' % dJdc
+        title += r', $\gamma = %.2f$' % self.adjoint.lr
+        ax.set_title(title)
+        ax.set_xlabel(r'force parameter $c$')
+        ax.set_ylabel(r'Loss Functional $\mathcal{J}$')
+        ax.set_ylim(bottom=-0.01)
+        ax.legend(loc='lower left')
+        # make kappa a tick label
+        ax.xaxis.set_major_formatter(mticker.FuncFormatter(
+            lambda x, pos : r'$\kappa$' if x == self.adjoint.kappa else x))
+

@@ -2,15 +2,7 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import spsolve 
 import warnings
-import imageio
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
-import matplotlib.pylab as pl
-from matplotlib.gridspec import GridSpec
-from matplotlib.patches import FancyArrowPatch
-from matplotlib.colors import ListedColormap
-plt.rcParams.update({'font.size': 26,
-                     'legend.handlelength': 2})
+from . import plotter
 
 
 ############################
@@ -224,44 +216,18 @@ class PoissonBC:
         for i, theta in enumerate(thetas):
             self.solutions[i] = self.get_solution(theta).flatten()
 
-####################
-# PLOTTING METHODS #
-####################
+        # pass grad descent data to plotter
+        self.plt = plotter.AdjointDescent(self)
+
+    ####################
+    # PLOTTING METHODS #
+    ####################
 
     def plot_grad_descent(self):
         """
         Performs and plots gradient descent.
-        Inputs same as self.gradient_descent():
-            theta_init - initial guess at kappa, beta0, beta1
-            gamma - learning rate
-            tol - acceptable distance from kappa
-            max_its - bound for number of iterations
         """
-        # get parameters
-        c, kappa = (self.thetas[:,0], self.theta_true[0])
-        b0, beta0 = (self.thetas[:,1], self.theta_true[1])
-        b1, beta1 = (self.thetas[:,2], self.theta_true[2])
-        
-        # 2x2 grid (b0, b1, \\ c, u)
-        fig, ax = plt.subplots(2, 2, figsize=(18,15), dpi=200)
-
-        # plot c, b0, b1
-        self.plot_param(ax[1,0], c, 0)
-        self.plot_param(ax[0,0], b0, 1)
-        self.plot_param(ax[0,1], b1, 2)
-
-        # plot solutions
-        self.plot_solns(ax[1,1])
-
-        # make title
-        fig.add_subplot(111, frame_on=False)
-        plt.tick_params(labelcolor='none', bottom=False, left=False)
-        title = r'%d iterations ' % max(self.iterations)
-        title += 'at learning rate $\gamma = %.1f$' % self.lr
-        plt.title(title)
-
-        plt.show()
-        plt.close()
+        self.plt.grad_descent_bc()
 
     def plot_curve_convergence(self):
         """
@@ -272,13 +238,7 @@ class PoissonBC:
             tol - acceptable distance from kappa
             max_its - bound for number of iterations
         """
-        fig, ax = plt.subplots(1, 1, figsize=(20,15), dpi=200)
-        
-        title = r'%d iterations ' % max(self.iterations)
-        title += 'at learning rate $\gamma = %.1f$' % self.lr
-        self.plot_solns(ax, title)
-        plt.show()
-        plt.close()
+        self.plt.curve_convergence()
 
     def biplot_grad_descent(self):
         """
@@ -289,21 +249,7 @@ class PoissonBC:
             tol - acceptable distance from kappa
             max_its - bound for number of iterations
         """
-        fig, ax = plt.subplots(self.theta_dim, 1, figsize=(18,18), dpi=200)
-
-        for i in range(self.theta_dim):
-            j = (i + 1) % 3 
-            params = [self.thetas[:,i], self.thetas[:,j]]
-            idxs = [i, j]
-            self.biplot_params(ax[i], params, idxs)
-        
-        fig.add_subplot(111, frame_on=False)
-        plt.tick_params(labelcolor='none', bottom=False, left=False)
-        title = '%d iterations to convergence, ' % max(self.iterations)
-        title += r'$\gamma = %.1f$' % self.lr
-        plt.title(title)
-        plt.show()
-        plt.close()
+        self.plt.biplot_descent_bc()
 
     def plot_learning_rates(self, theta_init, lr_bounds, tol, max_its=500):
         """
@@ -320,218 +266,12 @@ class PoissonBC:
         for lr in learning_rates:
             thetas = self.grad_descent(theta_init, lr, tol, max_its)
             data[lr] = max(thetas.keys())  # keys are iterations
-        lr, counts = zip(*data.items())
-        lr_opt = lr[np.argmin(counts)]
 
-        # now plot the data
-        fig, ax = plt.subplots(1, 1, figsize=(18,10), dpi=200)
-        ax.plot(lr, counts, linewidth=5, color='C1')
-        ax.set_xlabel('Learning Rate ' + r'$\gamma$')
-        ax.set_ylabel('iterations to convergence (%d max)' % max_its)
-        ax.set_title(r'%d iterations at $\gamma = %.2f$' 
-                     % (np.min(counts), lr_opt))
-        plt.show()
-        plt.close()
+        self.plt.learning_rates(data, max_its)
 
-######################
-# LOSS CONTOUR VIDEO #
-######################
-# These methods make an mp4 of contour plots
-# as the force term c varies.
-#   1) user chooses ranges = [c_min, c_max, b0_min, b0_max, b1_min, b1_max]
-#   2) loss is calculated for all possible triplets (c, b0, b1)
-#   3) values of c are looped over to save contour plot frames
-#
-# Frames are saved in the directory visuals/contour/frames/
-# The mp4 is saved in the directory visuals/contour/
-
-  #  def __init__(self, ranges, contour_res, c_res):
-  #      self.ranges = ranges # ranges for parmeters
-  #      self.contour_res = contour_res 
-  #      self.c_res = c_res
-  #      self.mp4_path = 'visuals/contour/contour.mp4'
-  #      self.frames_path = 'visuals/contour/frames/'
-  #      self.get_loss = Poisson.get_loss
-
-    def contour(self, ranges, contour_res, c_idx):
-        """
-        Plot and show one frame of the contour video using c[c_idx]
-        """
-        # loss tensor needs to be computed if
-        #  1) doesn't exist
-        #  2) has updated ranges
-        #  3) has updated resolutions
-        if not hasattr(self, 'losses'):
-            self.get_tensors() 
-
-        loss_slice = self.losses[:, :, c_idx]
-        
-        fig, ax = plt.subplots(1, 1, figsize=(18,15), dpi=200)
-        log_loss = -np.log(self.losses)
-        lines = np.linspace(np.min(log_loss),
-                            np.max(log_loss),
-                            20)
-        cont = ax.contourf(self.b0, self.b1, log_loss[:,:, c_idx], lines)
-        #plt.clabel(cont, inline=True, fontsize=8)
-        fig.colorbar(cont)
-        ax.scatter(1., -1, c='k', s=15**2)
-        ax.set_xlim([self.b0.min(), self.b0.max()])
-        ax.set_ylim([self.b1.min(), self.b1.max()])
-
-    def get_tensors(self, ranges, contour_res, c_res):
-        """
-        Given ranges of theta=(c, b0, b1)
-        compute a mesh grid for the loss J: R^3 -> R
-        Returns meshgrids for theta and losses
-        """
-        # unpack theta ranges 
-        c_min, c_max, b0_min, b0_max, b1_min, b1_max = ranges
-
-        # make tensors
-        c = np.linspace(c_min, c_max, c_res)
-        self.c = c
-        b0 = np.linspace(b0_min, b0_max, contour_res)
-        b1 = np.linspace(b1_min, b1_max, contour_res)
-        b0_tensor, b1_tensor = np.meshgrid(b0, b1)
-
-        # make loss tensor
-        losses = np.zeros((self.contour_res, self.contour_res, self.c_res))
-        # compute losses
-        for c_idx in range(self.c_res):
-            for idx, _ in np.ndenumerate(b0_tensor):
-                c = self.c[c_idx]
-                b0 = b0_tensor[idx]
-                b1 = b1_tensor[idx]
-                losses[idx + (c_idx,)] = self.get_loss([c, b0, b1])
-
-        self.b0 = b0_tensor
-        self.b1 = b1_tensor
-        self.losses = losses
-
-    def save_frame(self, c_idx):
-        """
-        Plots contours of loss surface where each frame
-        is a value of the force parameter c
-        """
-        self.contour(c_idx)
-        frames_path = 'visuals/contour/frames/'
-        plt.savefig(self.frames_path + str(c_idx) + '.png')
-        plt.close()
-
-    def make_mp4(self):
-
-        # compute loss tensor and save contours
-        self.get_tensors()
-        
-        duration = 5 # seconds 
-        fps = int(self.c_res / duration)
-            
-        with imageio.get_writer(self.mp4_path, mode='I', fps=fps) as writer:
-            for frame in range(self.c_res):
-                self.save_frame(frame)
-                writer.append_data(
-                        imageio.imread(
-                            self.frames_path + str(frame) + '.png'
-                            )
-                        )
-
-###################
-# SUBPLOT METHODS #
-###################
-
-    def plot_param(self, ax, param, idx):
-        """
-        Plots parameter convergence during gradient descent
-        Inputs:
-            ax - axis object for plotting
-            param - parameter to plot vs iterations
-            idx - index for true parameter (0:kappa, 1:beta0, 2:beta1)
-        """
-        # make names and get true parameter
-        theta_names = [r'$c$', r'$b_0$', r'$b_1$']
-        theta_true_names = [r'$\kappa$', r'$\beta_0$', r'$\beta_1$']
-        true_param = self.theta_true[idx]
-
-        # plot parameter with hline of true parameter value
-        ax.plot(self.iterations, param, color='g', linewidth=3)
-        ax.hlines(true_param, 
-                  xmin=0, xmax=max(self.iterations),
-                  linewidth=3, 
-                  color='k', 
-                  linestyle='dashed')
-        ax.set_xlabel('iterations')
-        ax.legend([theta_names[idx], theta_true_names[idx]])
-
-    def plot_solns(self, ax, title=''):
-        """
-        Plots gradient descent in solution space
-        """
-        # plot all the us
-        u_lab = r'$u$'
-        for i, u in enumerate(self.solutions):
-            alpha_i = 1./(i+1)
-            ax.plot(self.x, u, 
-                    label=u_lab, 
-                    linewidth=3, 
-                    color='C0', 
-                    alpha=alpha_i)
-            u_lab = ''
-
-        # plot Phi without noise
-        Phi = self.Phi - self.noise
-        ax.plot(self.x, Phi, 
-                label=r'$\Phi$',
-                linewidth=3, 
-                color='k',
-                linestyle='dashed')
-
-        # plot Phi with noise if exists
-        if self.sigma != 0:
-            ax.plot(self.x, self.Phi, 
-                    label=r'$\Phi + $noise',
-                    linewidth=3, 
-                    color='0.5', 
-                    linestyle='dashed')
-        
-        ax.set_xlabel(r'$\Omega$')
-        ax.set_title(title)
-        ax.legend()
-
-    def biplot_params(self, ax, params, idxs, title=''):
-        """
-        Plots gradient descent in parameter space with param_y vs param_x
-        Inputs:
-            ax - the axis plotting object
-            params - list or tuple of parameter data [param_x, param_y]
-            idxs - list or tuple of parameter indices from theta_true
-                   (0:kappa, 1:beta0, 2:beta1)
-        """
-        # make names and get true parameter
-        theta_names = [r'$c$', r'$b_0$', r'$b_1$']
-        theta_true_names = [r'$\kappa$', r'$\beta_0$', r'$\beta_1$']
-        param_x, param_y = params
-        x, y = idxs
-
-        # make ordered pairs for legend
-        ordered_pair = lambda x, y : '(' + x + ', ' + y + ')'
-        curve = ordered_pair(theta_names[x], theta_names[y])
-        optim = ordered_pair(theta_true_names[x], theta_true_names[y])
-
-        # make the plot
-        ax.plot(param_x, param_y, 
-                label=curve, 
-                linewidth=3, 
-                color='r')
-        ax.scatter(self.theta_true[x], self.theta_true[y], 
-                   label=optim, 
-                   s=12 ** 2, 
-                   c='k')
-        ax.legend()
-        ax.set_title(title)
-    
-###################
-# TESTING METHODS #
-###################
+    ###################
+    # TESTING METHODS #
+    ###################
 
     def test_get_grad(self, theta):
         """
@@ -626,29 +366,12 @@ class PoissonLBC(PoissonBC):
         for i, theta in enumerate(thetas):
             self.solutions[i] = self.get_solution(theta).flatten()
 
-    def test_get_grad(self, theta):
-        """
-        Compares the analytic gradient to the numerical gradient
-            analytic grad = (c - kappa)/120
-        """
-        # first compute the analytic gradient
-        theta = np.array(theta)
-        theta_diffs = theta - self.theta_true[:2]
-        theta_diffs = theta_diffs.reshape(1, -1)
-        coefs = np.array([[1./120, 5./120], [1./24, 8./24]])
-        analytic_grad_J = theta_diffs.dot(coefs)
+        # pass descent data to plotter
+        self.plt = plotter.AdjointDescent(self)
 
-        # now the numerical gradient
-        c, b0 = theta
-        grad_J = self.get_grad([c, b0, self.b1])
-
-        # print results
-        print('analytic gradient:', analytic_grad_J)
-        print('numerical gradient:', grad_J)
-
-################
-# PLOT METHODS #
-################
+    ################
+    # PLOT METHODS #
+    ################
 
     def plot_grad_descent(self):
         """
@@ -663,49 +386,48 @@ class PoissonLBC(PoissonBC):
         c, kappa = (self.thetas[:,0], self.theta_true[0])
         b0, beta0 = (self.thetas[:,1], self.theta_true[1])
 
-        # make plots
-        fig, ax = plt.subplots(2, 2, figsize=(15, 15), dpi=200)
-        fig.subplots_adjust(hspace=0.25)
-        self.plot_param(ax[0,0], c, 0)
-        self.plot_param(ax[0,1], b0, 1)
-        for ax in ax[1,:]: ax.remove()
-        gs = GridSpec(2,2)
-        soln_ax = fig.add_subplot(gs[1,:])
-        self.plot_solns(soln_ax)
-
-        # make title
-        fig.add_subplot(111, frame_on=False)
-        plt.tick_params(labelcolor='none', bottom=False, left=False)
-        title = r'%d iterations ' % max(self.iterations)
-        title += 'at learning rate $\gamma = %.1f$' % self.lr
-        plt.title(title)
-
-        plt.show()
-        plt.close()
+        self.plt.grad_descent_lbc(c, kappa, b0, beta0)
 
     def biplot_grad_descent(self):
+        """ Makes pairwise biplots of theta convergence """
+        self.plt.biplot_descent_lbc()
+
+    def plot_learning_rates(self, theta_init, lr_bounds, tol, max_its=500):
         """
-        Performs gradient descent and makes pairwise biplots
-        Inputs same as self.gradient_descent():
-            theta_init - initial guess at kappa, beta0, beta1
-            gamma - learning rate
-            tol - acceptable distance from kappa
-            max_its - bound for number of iterations
+        Plots number of iterations to convergence
+        as a function of learning rate given by lr_bounds
         """
-        fig, ax = plt.subplots(1, 1, figsize=(18,15), dpi=200)
+        theta_init.append(self.b1)
+        super().plot_learning_rates(theta_init, lr_bounds, tol, max_its)
 
-        # make plot
-        params = [self.thetas[:,0], self.thetas[:,1]]
-        idxs = [0, 1]
-        self.biplot_params(ax, params, idxs)
+    def save_contour_frame(self, frame_num):
+        """
+        Plots contours of loss surface where each frame
+        is a value of the force parameter c
+        """
+        self.contour(frame_num + 1, self.ranges)
+        frame_path = 'visuals/contour_lbc/frames/'
+        self.plt.save_frame(frame_num, frame_path)
 
-        # make title
-        title = '%d iterations to convergence, ' % max(self.iterations)
-        title += r'$\gamma = %.1f$' % self.lr
-        ax.set_title(title)
+    def contour_mp4(self):
+        """
+        Save mp4 of parameters converging to optimum on contour plot
+        """
+        self.get_contour_slice()
+        save_frame = self.save_contour_frame
 
-        plt.show()
-        plt.close()
+        # make settings dictionary
+        settings = dict()
+        settings['mp4_path'] = 'visuals/contour_lbc/descending.mp4'
+        settings['frame_path'] = 'visuals/contour_lbc/frames/'
+        settings['num_frames'] = len(self.contour_c)
+        settings['duration'] = 5 # seconds 
+
+        self.plt.save_mp4(save_frame, settings)
+
+    ################
+    # LOSS CONTOUR #
+    ################
 
     def get_tensors(self, ranges, contour_res):
         """
@@ -765,60 +487,31 @@ class PoissonLBC(PoissonBC):
         log_losses = -np.log(self.losses)
         lines = np.linspace(np.min(log_losses), np.max(log_losses), 20)
 
-        # make biplot and contour
-        fig, ax = plt.subplots(1, 1, figsize=(18,10), dpi=200)
-        cont = ax.contourf(self.c_tensor, self.b0_tensor, log_losses, lines)
-        
-        grad = self.get_grad([c[-1], b0[-1], self.b1])
-        title = r'$\frac{d\mathcal{J}}{d\theta} = '
-        title += '(%.7f, %.7f)$' % (grad[0,0], grad[0,1])
-        self.biplot_params(ax, [c, b0], [0, 1], title)
-        ax.scatter(c[-1], b0[-1], c='r', s=10**2)
-        cbar = fig.colorbar(cont)
-        cbar.set_label(r'$-\log(\mathcal{J})$', rotation=90)
-        ax.set_xlim([c_min, c_max])
-        ax.set_ylim([b0_min, b0_max])
-        ax.set_xlabel(r'$c$')
-        ax.set_ylabel(r'$b_0$')
+        self.plt.loss_contour(c, b0, log_losses)
 
-    def save_contour_frame(self, frame_num):
-        """
-        Plots contours of loss surface where each frame
-        is a value of the force parameter c
-        """
-        self.contour(frame_num, self.ranges)
-        frames_path = 'visuals/contour_lbc/frames/'
-        plt.savefig(frames_path + str(frame_num) + '.png')
-        plt.close()
+    ###################
+    # TESTING METHODS #
+    ###################
 
-    def contour_mp4(self):
+    def test_get_grad(self, theta):
         """
-        Save mp4 of parameters converging to optimum on contour plot
+        Compares the analytic gradient to the numerical gradient
+            analytic grad = (c - kappa)/120
         """
-        self.get_contour_slice()
-        num_its = len(self.contour_c)
-        duration = 5 # seconds 
-        fps = int(num_its / duration)
-        mp4_path = 'visuals/contour_lbc/descending.mp4'
-        frames_path = 'visuals/contour_lbc/frames/'
-            
-        with imageio.get_writer(mp4_path, mode='I', fps=fps) as writer:
-            for frame in range(1, num_its):
-                self.save_contour_frame(frame)
-                writer.append_data(
-                        imageio.imread(
-                            frames_path + str(frame) + '.png'
-                            )
-                        )
+        # first compute the analytic gradient
+        theta = np.array(theta)
+        theta_diffs = theta - self.theta_true[:2]
+        theta_diffs = theta_diffs.reshape(1, -1)
+        coefs = np.array([[1./120, 5./120], [1./24, 8./24]])
+        analytic_grad_J = theta_diffs.dot(coefs)
 
-    def plot_learning_rates(self, theta_init, lr_bounds, tol, max_its=500):
-        """
-        Plots number of iterations to convergence
-        as a function of learning rate given by lr_bounds
-        """
-        theta_init.append(self.b1)
-        super().plot_learning_rates(theta_init, lr_bounds, tol, max_its)
+        # now the numerical gradient
+        c, b0 = theta
+        grad_J = self.get_grad([c, b0, self.b1])
 
+        # print results
+        print('analytic gradient:', analytic_grad_J)
+        print('numerical gradient:', grad_J)
 
 
 #######################
@@ -867,24 +560,12 @@ class Poisson(PoissonBC):
         for i, theta in enumerate(thetas):
             self.solutions[i] = self.get_solution(theta).flatten()
 
-    def test_get_grad(self, c):
-        """
-        Compares the analytic gradient to the numerical gradient
-            analytic grad = (c - kappa)/120
-        """
-        # first compute the analytic gradient
-        analytic_grad_J = (c - self.kappa) / 120.
+        # pass descent data to plotter
+        self.plt = plotter.AdjointDescent(self)
 
-        # now the numerical gradient
-        grad_J = self.get_grad([c, self.b0, self.b1])
-
-        # print results
-        print('analytic gradient:', analytic_grad_J)
-        print('numerical gradient:', grad_J.item())
-
-################
-# PLOT METHODS #
-################
+    ################
+    # PLOT METHODS #
+    ################
 
     def save_loss_frame(self, c_init, frame_num):
         """
@@ -892,27 +573,22 @@ class Poisson(PoissonBC):
         is a value of the force parameter c
         """
         self.plot_loss(c_init)
-        frames_path = 'visuals/loss/frames/'
-        plt.savefig(frames_path + str(frame_num) + '.png')
-        plt.close()
+        frame_path = 'visuals/loss/frames/'
+        self.plt.save_frame(frame_num, frame_path)
 
-    def loss_mp4(self):
-
+    def loss_mp4(self, c_init):
+        """ Saves video of gradient descent starting at c_init """
         cs = self.thetas[:,0]
-        duration = 5 # seconds 
-        num_its = len(cs)
-        fps = int(num_its / duration)
-        mp4_path = 'visuals/loss/descending.mp4'
-        frames_path = 'visuals/loss/frames/'
+        save_frame = lambda frame : self.save_loss_frame(cs[frame], frame)
+
+        # make settings dictionary
+        settings = dict()
+        settings['mp4_path'] = 'visuals/loss/descending.mp4'
+        settings['frame_path'] = 'visuals/loss/frames/'
+        settings['num_frames'] = len(self.thetas[:,0])
+        settings['duration'] = 5 # seconds 
             
-        with imageio.get_writer(mp4_path, mode='I', fps=fps) as writer:
-            for frame, c in enumerate(cs):
-                self.save_loss_frame(c, frame)
-                writer.append_data(
-                        imageio.imread(
-                            frames_path + str(frame) + '.png'
-                            )
-                        )
+        self.plt.save_mp4(save_frame, settings)
 
     def plot_loss(self, c_init):
         """
@@ -937,79 +613,14 @@ class Poisson(PoissonBC):
         tangent = lambda dom, x, y, m : m * (dom - x) + y
         grad_line = tangent(c_range, c_init, Jc, dJdc)
 
-        # make axis
-        fig, ax = plt.subplots(1, 1, figsize=(18, 15), dpi=200)
-
-        # plot tangent line
-        ax.plot(c_range, grad_line,
-                label=r'$-\gamma \frac{d\mathcal{J}}{dc}$',
-                linewidth=5, 
-                c='r',
-                alpha=0.5)
-
-        # plot (c, J(c))
-        ax.scatter(c_init, Jc, 
-                   label=r'$(c, \mathcal{J}(c))$',
-                   s=12**2, 
-                   c='g',
-                   zorder=2.5)
-
-        # plot gradient vector
-        dc = -self.lr * dJdc 
-        ax.arrow(x=c_init, y=Jc, dx=dc, dy=0, 
-                #length_includes_head=True,
-                head_length=0.05,
-                color='r',
-                alpha=0.5)
-
-        # compute and plot loss
-        loss = np.zeros(c_range.shape)
-        for i, c in enumerate(c_range):
-            loss[i] = self.get_loss([c, self.b0, self.b1])
-        loss_plot = ax.plot(c_range, loss, 
-                label=r'$\mathcal{J}(c)$',
-                linewidth=5, 
-                c='mediumblue')
-
-        # set labels and title
-        title = r'$\frac{d\mathcal{J}}{dc} = %.7f$' % dJdc
-        title += r', $\gamma = %.2f$' % self.lr
-        ax.set_title(title)
-        ax.set_xlabel(r'force parameter $c$')
-        ax.set_ylabel(r'Loss Functional $\mathcal{J}$')
-        ax.set_ylim(bottom=-0.01)
-        ax.legend(loc='lower left')
-        # make kappa a tick label
-        ax.xaxis.set_major_formatter(mticker.FuncFormatter(
-            lambda x, pos : r'$\kappa$' if x == self.kappa else x))
+        self.plt.loss(c_init, c_range, grad_line, Jc, dJdc)
 
     def plot_grad_descent(self):
-        """
-        Performs and plots gradient descent.
-        Inputs same as self.gradient_descent():
-            c_init - initial guess at kappa
-            gamma - learning rate
-            tol - acceptable distance from kappa
-            max_its - bound for number of iterations
-        """
+        """ Plots gradient descent results """
         # get parameters
         c, kappa = (self.thetas[:,0], self.theta_true[0])
 
-        # make plots
-        fig, ax = plt.subplots(2, 1, figsize=(15, 15), dpi=200)
-        fig.subplots_adjust(hspace=0.25)
-        self.plot_param(ax[0], c, 0)
-        self.plot_solns(ax[1])
-
-        # make title
-        fig.add_subplot(111, frame_on=False)
-        plt.tick_params(labelcolor='none', bottom=False, left=False)
-        title = r'%d iterations ' % max(self.iterations)
-        title += 'at learning rate $\gamma = %.1f$' % self.lr
-        plt.title(title)
-
-        plt.show()
-        plt.close()
+        self.plt.grad_descent(c, kappa)
 
     def plot_learning_rates(self, c_init, lr_bounds, tol, max_its=500):
         """
@@ -1019,5 +630,22 @@ class Poisson(PoissonBC):
         theta_init = [c_init, self.b0, self.b1]
         super().plot_learning_rates(theta_init, lr_bounds, tol, max_its)
 
+    ###################
+    # TESTING METHODS #
+    ###################
 
+    def test_get_grad(self, c):
+        """
+        Compares the analytic gradient to the numerical gradient
+            analytic grad = (c - kappa)/120
+        """
+        # first compute the analytic gradient
+        analytic_grad_J = (c - self.kappa) / 120.
+
+        # now the numerical gradient
+        grad_J = self.get_grad([c, self.b0, self.b1])
+
+        # print results
+        print('analytic gradient:', analytic_grad_J)
+        print('numerical gradient:', grad_J.item())
 
