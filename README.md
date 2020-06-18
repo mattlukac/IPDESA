@@ -21,7 +21,9 @@ See [this notebook](adjoint_PDE.html) for a thorough demonstration.
 ## Supervised Encoding Usage
 **Requirements:** Tensorflow 2.2 and scikit-learn 0.23.1
 
-See [this notebook](poisson_encoder.html) for a demonstration.
+See [this notebook](poisson_encoder.html) for a demonstration,
+and compare it to the 
+[analytic autoencoder version](poisson_analytic_autoencoder.html).
 
 The `equations/` directory contains some example config files.
 There are four requirements for the config files:

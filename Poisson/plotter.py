@@ -37,11 +37,11 @@ def identity(ax):
     y = x 
     ax.plot(x, y, c='r', lw=3, alpha=0.5)
 
-def suptitle(fig, title):
+def suptitle(fig, title, pad=0):
     """ Adds title above subplots """
     fig.add_subplot(111, frame_on=False)
     plt.tick_params(labelcolor='none', bottom=False, left=False)
-    plt.title(title)
+    plt.title(title, pad=pad)
 
 def noise_title(train_sigma, test_sigma):
     """
@@ -256,7 +256,7 @@ def solution_fit(Phi, theta_Phi, theta_from_Phi, u_from_Phi, sigma=0, seed=23):
     cols = 3 if sigma != 0 else 2
     fig.legend(fontsize=26, loc='upper center', ncol=cols)
 
-    suptitle(fig, 'Test set sample')
+    suptitle(fig, 'Test set sample', pad=20)
     plt.show()
     plt.close()
 
@@ -275,8 +275,6 @@ def theta_boot(test, boot_data, sigmas):
     fig, ax = plt.subplots(3,1, figsize=(20,20))
     param = [r'$c$', r'$b_0$', r'$b_1$']
     train_sigma, test_sigma = sigmas
-    title = noise_title(train_sigma, test_sigma)
-    ax[0].set_title(title)
     for i in range(3):
         # plot bootstrap means
         ax[i].scatter(test_theta[:,i], stats['means'][:,i], 
@@ -292,6 +290,8 @@ def theta_boot(test, boot_data, sigmas):
         ax[i].set_ylabel('Predictions')
         ax[i].legend(loc='upper left', fontsize=26)
     ax[2].set_xlabel('Truth')
+    title = noise_title(train_sigma, test_sigma)
+    suptitle(fig, title, pad=20)
     plt.show()
     plt.close()
 
@@ -374,8 +374,7 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
         labs = ['' for lab in labs] # don't label other plots
 
     # title
-    suptitle(fig, title)
-    plt.title(pad=20)
+    suptitle(fig, title, pad=20)
     
     # legend in proper order
     handles, labels = ax[0,0].get_legend_handles_labels()
