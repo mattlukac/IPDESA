@@ -1,11 +1,11 @@
+import numpy as np 
+from copy import deepcopy
 import tensorflow as tf
 from tensorflow.random import set_seed
 from tensorflow.keras.layers import *
 from sklearn import preprocessing
 from . import equation, plotter
 from .bootstrapper import bootstrap
-from copy import deepcopy
-import numpy as np 
 
 
 class AnalyticAutoEncoder:
@@ -78,13 +78,16 @@ class AnalyticAutoEncoder:
         set_seed(seed)
         self.build_model()
 
+        self.theta_history = LatentThetaHistory(self.test_data[0])
+
         # train and print losses
         print('training...')
         self.model.fit(x=train_data[0], y=train_data[0],
                        validation_data=(val_data[0], val_data[0]),
                        epochs=self.epochs,
                        batch_size=self.batch_size,
-                       verbose=verbose)
+                       verbose=verbose, 
+                       callbacks=[self.theta_history])
         print('--------')
         print('Reconstructed Phi MSE')
         print('Training:', 
@@ -105,21 +108,94 @@ class AnalyticAutoEncoder:
 # PLOT METHODS #
 ################
 
-    def plot_theta_fit(self, sigma=0, seed=23, transform=True):
-        Phi, theta_Phi = deepcopy(self.test_data)
+    def plot_theta_fit(self, sigma=0, seed=23, transform=True, history=None):
+        Phi, theta_Phi = self.noisify(self.test_data, sigma)
+        theta = self.theta_from_Phi(Phi)
+
         plotter.theta_fit(Phi, theta_Phi,
-                          self.theta_from_Phi,
+                          theta,
                           sigma,
                           seed,
                           transform)
 
     def plot_solution_fit(self, sigma=0, seed=23):
+        _, theta_Phi = deepcopy(self.test_data)
+        Phi, noise, sample = self.solution_fit_sample(sigma)
+        theta_Phi = theta_Phi[sample]
+        theta = self.theta_from_Phi(Phi)
+        u_theta = self.u_from_Phi(Phi)
+        
+        plotter.solution_fit(Phi, noise, theta_Phi,
+                             theta,
+                             u_theta,
+                             sigma, 
+                             seed)
+    
+    def save_theta_epochs_frame(self, frame_num):
+        theta_frame = self.theta_history.epochs[frame_num]
+        Phi, theta_Phi = deepcopy(self.test_data)
+
+        plotter.theta_fit(Phi, theta_Phi, theta_frame, hold=True)
+        plotter.save_frame(frame_num, 'visuals/theta_epochs/frames/')
+
+    def save_theta_epochs_mp4(self):
+        # function that saves frame given fram_num
+        save_frame = self.save_theta_epochs_frame
+        # settings dictionary
+        settings = dict()
+        settings['mp4_path'] = 'visuals/theta_epochs/learn_theta.mp4'
+        settings['frame_path'] = 'visuals/theta_epochs/frames/'
+        settings['num_frames'] = len(self.theta_history.epochs)
+        settings['duration'] = 3
+
+        plotter.save_mp4(save_frame, settings)
+
+    def solution_fit_sample(self, sigma=0):
         # get Phi, theta_Phi, theta
         Phi, theta_Phi = deepcopy(self.test_data)
-        plotter.solution_fit(Phi, theta_Phi,
-                             self.theta_from_Phi,
-                             self.u_from_Phi,
-                             sigma, seed)
+        Phi, noise = plotter.add_noise(Phi, sigma)
+        
+        num_plots = 9
+        # get sample
+        sample = np.random.randint(0, len(Phi)-1, num_plots)
+        Phi, noise = Phi[sample], noise[sample]
+        return Phi, noise, sample
+
+    def save_solution_epochs_frame(self, epoch, sigma=0):
+        num_eps = len(self.theta_history.epochs)
+        theta_Phi = deepcopy(self.test_data[1])
+        Phi, noise, sample = self.solution_fit_sample(sigma)
+        theta_Phi = theta_Phi[sample]
+        thetas = np.zeros((num_eps, len(sample), 3))
+        u_thetas = np.zeros((num_eps,) + Phi.shape)
+        for ep, theta in self.theta_history.epochs.items():
+            thetas[ep] = theta[sample]
+            u_thetas[ep] = self.u_from_theta(theta[sample])
+        u_frame = u_thetas[epoch]
+
+        # get common ylim over all epochs
+        y_min = np.amin([Phi, np.amin(u_thetas, axis=0)], axis=(2,0))
+        y_max = np.amax([Phi, np.amax(u_thetas, axis=0)], axis=(2,0))
+        ylims = np.vstack((y_min, y_max)).T
+        ylims *= 1.1
+
+        plotter.solution_fit(Phi, noise, theta_Phi, 
+                theta, 
+                u_frame, 
+                hold=True,
+                ylims=ylims)
+        plotter.save_frame(epoch, 'visuals/solution_epochs/frames/')
+
+    def save_solution_epochs_mp4(self):
+        save_frame = self.save_solution_epochs_frame
+        # settings dictionary
+        settings = dict()
+        settings['mp4_path'] = 'visuals/solution_epochs/learn_solution.mp4'
+        settings['frame_path'] = 'visuals/solution_epochs/frames/'
+        settings['num_frames'] = len(self.theta_history.epochs)
+        settings['duration'] = 3
+
+        plotter.save_mp4(save_frame, settings)
         
 #####################
 # BOOTSTRAP METHODS #
@@ -233,3 +309,23 @@ class AnalyticAutoEncoder:
         theta_mse = np.mean((test_data[1] - theta) ** 2, axis=0)
         print('Noisy theta MSE:', theta_mse)
 
+
+class LatentThetaHistory(tf.keras.callbacks.Callback):
+    """ Get latent theta from test set at each training batch """
+    def __init__(self, test_Phi):
+        self.test_Phi = test_Phi
+#        self.batches = dict()
+        self.epochs = dict()
+
+    def set_model(self, model):
+        self.model = model
+        theta = self.model.get_layer(name='theta').output
+        self.get_theta = tf.keras.Model(self.model.input, theta)
+
+#    def on_train_batch_begin(self, batch, logs=None):
+#        theta = self.get_theta.predict(self.test_Phi)
+#        self.batches[batch] = theta
+
+    def on_epoch_begin(self, epoch, logs=None):
+        theta = self.get_theta.predict(self.test_Phi)
+        self.epochs[epoch] = theta

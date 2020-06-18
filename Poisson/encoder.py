@@ -121,9 +121,12 @@ class Encoder:
 
     def plot_theta_fit(self, sigma=0, seed=23, transform=True):
         Phi, theta_Phi = deepcopy(self.test_data)
+        Phi, _ = add_noise(Phi, sigma)
+        theta = self.theta_from_Phi(Phi)
+
         plotter.theta_fit(Phi, 
                           theta_Phi, 
-                          self.theta_from_Phi, 
+                          theta, 
                           sigma, 
                           seed,
                           transform)
@@ -131,11 +134,14 @@ class Encoder:
     def plot_solution_fit(self, sigma=0, seed=23):
         # get Phi, theta_Phi, theta
         Phi, theta_Phi = deepcopy(self.test_data)
-        theta = self.model.predict(Phi)
-        plotter.solution_fit(Phi, 
+        Phi, noise = add_noise(Phi, sigma)
+        theta = self.theta_from_Phi(Phi)
+        u_theta = self.u_from_Phi(Phi)
+
+        plotter.solution_fit(Phi, noise,
                              theta_Phi, 
-                             self.theta_from_Phi, 
-                             self.u_from_Phi, 
+                             theta, 
+                             u_theta, 
                              sigma, 
                              seed)
 
