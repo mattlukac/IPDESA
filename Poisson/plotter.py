@@ -43,19 +43,29 @@ def suptitle(fig, title, pad=0):
     plt.tick_params(labelcolor='none', bottom=False, left=False)
     plt.title(title, pad=pad)
 
+def show():
+    """ 
+    Plot methods don't show by default, 
+    so call this in network plot methods 
+    """
+    plt.show()
+    plt.close()
+
 ############
 # SAVE MP4 #
 ############
 
-def save_frame(frame_num, frame_path):
+def save_frame(frame_num, frame_path, frame_plot):
     """ Used at the end of any method that plots a frame to be saved """
+    # frame plot
+    frame_plot()
     plt.savefig(frame_path + str(frame_num) + '.png')
     plt.close()
 
-def save_mp4(save_frame, settings):
+def save_mp4(frame_saver, settings):
     """
     Creates mp4 from collection of frames.
-      save_frame - function that saves frame to frame_path
+      frame_saver - function that saves frame to frame_path
       settings - dictionary containing:
         mp4_path - path (including file name) to the mp4
         frame_path - path to directory containing frames
@@ -72,7 +82,7 @@ def save_mp4(save_frame, settings):
     fps = int(num_frames / duration)
     with imageio.get_writer(mp4_path, mode='I', fps=fps) as writer:
         for frame in range(num_frames):
-            save_frame(frame)
+            frame_saver(frame)
             writer.append_data(
                     imageio.imread(
                         frame_path + str(frame) + '.png'
@@ -171,14 +181,15 @@ def solution(domain, solution, theta):
         ax[i].set_title(title, fontsize=28)
     ax[0].set_ylabel(r'$u_\theta = u(x)$', fontsize=30)
 
-    plt.show()
-    plt.close()
-
 #############
 # MODEL FIT # 
 #############
 
-def theta_fit(Phi, theta_Phi, theta, sigma=0, seed=23, transform=True, hold=False):
+def theta_fit(Phi, theta_Phi, theta, 
+        sigma=0, 
+        seed=23, 
+        transform=True, 
+        verbose=True):
     """
     General plotting function to plot latent space theta vs theta_Phi,
     Inputs:
@@ -188,9 +199,9 @@ def theta_fit(Phi, theta_Phi, theta, sigma=0, seed=23, transform=True, hold=Fals
         sigma - standard deviation for normally distributed noise
         seed - random seed for reprodicibility
         transorm - plot theta components on common scale
-        hold - does not show or close plot
+        verbose - prints mean square errors
     """
-    if not hold:
+    if verbose:
         # evaluate, predict, and plot with trained model
         theta_mse = np.mean((theta - theta_Phi) ** 2, axis=0)
         print('theta MSE:', theta_mse)
@@ -203,18 +214,15 @@ def theta_fit(Phi, theta_Phi, theta, sigma=0, seed=23, transform=True, hold=Fals
             figsize=(20,10*plot_rows))
 
     # plot transformed thetas
-    if transform and not hold:
+    if transform:
         theta_Phi, theta = rescale_thetas(theta_Phi, theta)
         
+    if verbose:
         # evaluate, predict, and plot with trained model
         theta_tform_mse = np.mean((theta - theta_Phi) ** 2, axis=0)
         print('transformed theta MSE:', theta_tform_mse)
 
     subplot_theta_fit(fig, ax, theta_Phi, theta)
-
-    if not hold:
-        plt.show()
-        plt.close()
 
 def subplot_theta_fit(fig, ax, theta_Phi, theta):
     """
@@ -235,8 +243,8 @@ def subplot_theta_fit(fig, ax, theta_Phi, theta):
 def solution_fit(Phi, noise, theta_Phi, theta, u_theta, 
         sigma=0, 
         seed=23, 
-        hold=False,
-        ylims=None):
+        ylims=None,
+        verbose=True):
     """
     General plotting function to plot Phi, Phi+noise (for nonzero sigma),
     and the reconstructed Phi u_theta
@@ -247,12 +255,13 @@ def solution_fit(Phi, noise, theta_Phi, theta, u_theta,
         u_from_Phi - function that reconstructs Phi given Phi
         sigma - standard deviation for normally distributed noise
         seed - random seed for reprodicibility
-        hold - don't show plot, used to make mp4
+        ylims - ylim for each subplot
+        verbose - print mean square errors
     """
     domain = np.linspace(0, 1, Phi.shape[1])
     theta_names = ['$c$', '$b_0$', '$b_1$']
 
-    if not hold:
+    if verbose:
         # compute mean square errors
         theta_mse = np.mean((theta - theta_Phi) ** 2, axis=0)
         Phi_mse = np.mean((u_theta - Phi) ** 2)
@@ -291,9 +300,6 @@ def solution_fit(Phi, noise, theta_Phi, theta, u_theta,
     fig.legend(fontsize=26, loc='upper center', ncol=cols)
 
     suptitle(fig, 'Test set sample', pad=20)
-    if not hold:
-        plt.show()
-        plt.close()
 
 #################
 # BOOTSTRAPPING #
@@ -327,8 +333,6 @@ def theta_boot(test, boot_data, sigmas):
     ax[2].set_xlabel('Truth')
     title = noise_title(train_sigma, test_sigma)
     suptitle(fig, title, pad=20)
-    plt.show()
-    plt.close()
 
 def solution_boot(test, boot_data, u_from_theta, sigmas):
     """
@@ -423,14 +427,11 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
             fontsize=26, 
             loc='upper center', 
             ncol = len(new_order))
-    
-    plt.show()
-    plt.close()
 
 
-####################
-# GRADIENT DESCENT #
-####################
+############################
+# ADJOINT GRADIENT DESCENT #
+############################
 
 class AdjointDescent:
     """
@@ -445,42 +446,6 @@ class AdjointDescent:
         self.theta_names = [r'$c$', r'$b_0$', r'$b_1$']
         self.theta_Phi_names = [r'$\kappa$', r'$\beta_0$', r'$\beta_1$']
 
-
-    ############
-    # SAVE MP4 #
-    ############
-
-    def save_frame(self, frame_num, frame_path):
-        """ Used at the end of any method that plots a frame to be saved """
-        plt.savefig(frame_path + str(frame_num) + '.png')
-        plt.close()
-
-    def save_mp4(self, save_frame, settings):
-        """
-        Creates mp4 from collection of frames.
-          save_frame - function that saves frame to frame_path
-          settings - dictionary containing:
-            mp4_path - path (including file name) to the mp4
-            frame_path - path to directory containing frames
-            num_frames - number of frames to make
-            duration - length of video (in seconds)
-        """
-        # unpack dictionary
-        mp4_path = settings['mp4_path']
-        frame_path = settings['frame_path']
-        num_frames = settings['num_frames']
-        duration = settings['duration']
-
-        # make video
-        fps = int(num_frames / duration)
-        with imageio.get_writer(mp4_path, mode='I', fps=fps) as writer:
-            for frame in range(num_frames):
-                save_frame(frame)
-                writer.append_data(
-                        imageio.imread(
-                            frame_path + str(frame) + '.png'
-                            )
-                        )
 
     ####################
     # BOUNDARY CONTROL #

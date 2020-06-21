@@ -117,7 +117,8 @@ class AnalyticAutoEncoder:
                           sigma,
                           seed,
                           transform)
-
+        plotter.show()
+        
     def plot_solution_fit(self, sigma=0, seed=23):
         _, theta_Phi = deepcopy(self.test_data)
         Phi, noise, sample = self.solution_fit_sample(sigma)
@@ -130,17 +131,23 @@ class AnalyticAutoEncoder:
                              u_theta,
                              sigma, 
                              seed)
+        plotter.show()
     
     def save_theta_epochs_frame(self, frame_num):
         theta_frame = self.theta_history.epochs[frame_num]
         Phi, theta_Phi = deepcopy(self.test_data)
 
-        plotter.theta_fit(Phi, theta_Phi, theta_frame, hold=True)
-        plotter.save_frame(frame_num, 'visuals/theta_epochs/frames/')
+        frame_path = 'visuals/theta_epochs/frames/'
+        frame_plot = lambda : plotter.theta_fit(Phi, 
+                                                theta_Phi, 
+                                                theta_frame, 
+                                                hold=True)
+
+        plotter.save_frame(frame_num, frame_path, frame_plot)
 
     def save_theta_epochs_mp4(self):
         # function that saves frame given fram_num
-        save_frame = self.save_theta_epochs_frame
+        frame_saver = self.save_theta_epochs_frame
         # settings dictionary
         settings = dict()
         settings['mp4_path'] = 'visuals/theta_epochs/learn_theta.mp4'
@@ -148,7 +155,7 @@ class AnalyticAutoEncoder:
         settings['num_frames'] = len(self.theta_history.epochs)
         settings['duration'] = 3
 
-        plotter.save_mp4(save_frame, settings)
+        plotter.save_mp4(frame_saver, settings)
 
     def solution_fit_sample(self, sigma=0):
         # get Phi, theta_Phi, theta
@@ -182,8 +189,8 @@ class AnalyticAutoEncoder:
         plotter.solution_fit(Phi, noise, theta_Phi, 
                 theta, 
                 u_frame, 
-                hold=True,
-                ylims=ylims)
+                ylims=ylims,
+                verbose=False)
         plotter.save_frame(epoch, 'visuals/solution_epochs/frames/')
 
     def save_solution_epochs_mp4(self):
@@ -258,6 +265,7 @@ class AnalyticAutoEncoder:
         plotter.theta_boot(self.test_data, 
                 self.boot_preds, 
                 [self.train_sigma, self.test_sigma])
+        plotter.show()
 
     def plot_solution_boot(self):
         """
@@ -272,6 +280,7 @@ class AnalyticAutoEncoder:
                 self.boot_preds, 
                 self.u_from_theta,
                 [self.train_sigma, self.test_sigma])
+        plotter.show()
 
 ################
 # MISC METHODS #

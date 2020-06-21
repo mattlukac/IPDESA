@@ -405,16 +405,16 @@ class PoissonLBC(PoissonBC):
         Plots contours of loss surface where each frame
         is a value of the force parameter c
         """
-        self.contour(frame_num + 1, self.ranges)
         frame_path = 'visuals/contour_lbc/frames/'
-        self.plt.save_frame(frame_num, frame_path)
+        frame_plot = lambda : self.contour(frame_num + 1, self.ranges)
+        plotter.save_frame(frame_num, frame_path, frame_plot)
 
-    def contour_mp4(self):
+    def save_contour_mp4(self):
         """
         Save mp4 of parameters converging to optimum on contour plot
         """
         self.get_contour_slice()
-        save_frame = self.save_contour_frame
+        frame_saver = self.save_contour_frame
 
         # make settings dictionary
         settings = dict()
@@ -423,7 +423,7 @@ class PoissonLBC(PoissonBC):
         settings['num_frames'] = len(self.contour_c)
         settings['duration'] = 5 # seconds 
 
-        self.plt.save_mp4(save_frame, settings)
+        plotter.save_mp4(frame_saver, settings)
 
     ################
     # LOSS CONTOUR #
@@ -572,14 +572,14 @@ class Poisson(PoissonBC):
         Plots contours of loss surface where each frame
         is a value of the force parameter c
         """
-        self.plot_loss(c_init)
         frame_path = 'visuals/loss/frames/'
-        self.plt.save_frame(frame_num, frame_path)
+        frame_plot = lambda : self.plot_loss(c_init)
+        self.plt.save_frame(frame_num, frame_path, frame_plot)
 
-    def loss_mp4(self, c_init):
+    def save_loss_mp4(self, c_init):
         """ Saves video of gradient descent starting at c_init """
         cs = self.thetas[:,0]
-        save_frame = lambda frame : self.save_loss_frame(cs[frame], frame)
+        frame_saver = lambda frame : self.save_loss_frame(cs[frame], frame)
 
         # make settings dictionary
         settings = dict()
@@ -588,7 +588,7 @@ class Poisson(PoissonBC):
         settings['num_frames'] = len(self.thetas[:,0])
         settings['duration'] = 5 # seconds 
             
-        self.plt.save_mp4(save_frame, settings)
+        self.plt.save_mp4(frame_saver, settings)
 
     def plot_loss(self, c_init):
         """

@@ -13,17 +13,7 @@ from .bootstrapper import bootstrap
 
 class Encoder:
 
-    def __init__(self, design):
-
-        # attributes defined in design dictionary
-        self.num_layers = len(design['unit_activations'])
-        self.optim = design['optimizer']
-        self.loss = design['loss']
-        self.callbacks = design['callbacks']
-        self.batch_size = design['batch_size']
-        self.epochs = design['epochs']
-        self.activations = design['unit_activations']
-        self.drops = design['dropout']
+    def __init__(self, design=None):
 
         # attributes from Dataset class
         dataset = equation.Dataset('poisson')
@@ -35,6 +25,27 @@ class Encoder:
         self.theta_names = dataset.theta_names
         self.get_solution = dataset.vectorize_u
         
+        # attributes defined in design dictionary
+        if design is not None:
+            self.num_layers = len(design['unit_activations'])
+            self.optim = design['optimizer']
+            self.loss = design['loss']
+            self.callbacks = design['callbacks']
+            self.batch_size = design['batch_size']
+            self.epochs = design['epochs']
+            self.activations = design['unit_activations']
+            self.drops = design['dropout']
+        # default design
+        else:
+            self.num_layers = 2
+            self.optim = 'adam'
+            self.loss = 'mse'
+            self.callbacks = []
+            self.batch_size = 25
+            self.epochs = 25
+            self.activations = [(20, 'linear'), (3, 'linear')]
+            self.drops = [0.0]
+
         # set log directory
         self.log_dir = "logs/fit/" 
         self.log_dir += datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -121,29 +132,41 @@ class Encoder:
 
     def plot_theta_fit(self, sigma=0, seed=23, transform=True):
         Phi, theta_Phi = deepcopy(self.test_data)
-        Phi, _ = add_noise(Phi, sigma)
+        Phi, _ = plotter.add_noise(Phi, sigma)
         theta = self.theta_from_Phi(Phi)
 
-        plotter.theta_fit(Phi, 
-                          theta_Phi, 
+        plotter.theta_fit(Phi, theta_Phi, 
                           theta, 
                           sigma, 
                           seed,
                           transform)
+        plotter.show()
 
     def plot_solution_fit(self, sigma=0, seed=23):
         # get Phi, theta_Phi, theta
-        Phi, theta_Phi = deepcopy(self.test_data)
-        Phi, noise = add_noise(Phi, sigma)
+        _, theta_Phi = deepcopy(self.test_data)
+        Phi, noise, sample = self.solution_fit_sample(sigma)
+        theta_Phi = theta_Phi[sample]
         theta = self.theta_from_Phi(Phi)
         u_theta = self.u_from_Phi(Phi)
 
-        plotter.solution_fit(Phi, noise,
-                             theta_Phi, 
+        plotter.solution_fit(Phi, noise, theta_Phi, 
                              theta, 
                              u_theta, 
                              sigma, 
                              seed)
+        plotter.show()
+        
+    def solution_fit_sample(self, sigma=0):
+        # get Phi, theta_Phi, theta
+        Phi, theta_Phi = deepcopy(self.test_data)
+        Phi, noise = plotter.add_noise(Phi, sigma)
+
+        num_plots = 9
+        # get sample
+        sample = np.random.randint(0, len(Phi)-1, num_plots)
+        Phi, noise = Phi[sample], noise[sample]
+        return Phi, noise, sample
 
 ##########################
 # BOOTSTRAP PLOT METHODS #
@@ -213,6 +236,7 @@ class Encoder:
         plotter.theta_boot(self.test_data, 
                 self.boot_preds, 
                 [self.train_sigma, self.test_sigma])
+        plotter.show()
 
     def plot_solution_boot(self):
         """
@@ -223,6 +247,7 @@ class Encoder:
                 self.boot_preds, 
                 self.u_from_theta,
                 [self.train_sigma, self.test_sigma])
+        plotter.show()
 
 
 #############
