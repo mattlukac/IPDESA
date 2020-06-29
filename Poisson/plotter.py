@@ -1,6 +1,6 @@
 import numpy as np
+from .tools import *
 from copy import deepcopy
-from sklearn import preprocessing
 import imageio
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -18,18 +18,6 @@ plt.rcParams.update({'font.size' : 26,
 ####################
 # HELPER FUNCTIONS #
 ####################
-
-def add_noise(x, sigma, seed=23):
-    """
-    Adds Gaussian noise with stdev sigma to x
-    returns noisy x and the noise so 
-    we can denoise x later if we wish
-    """
-    np.random.seed(seed)
-    noise = np.random.randn(x.size)
-    noise = np.reshape(noise, x.shape)
-    noise *= sigma
-    return x+noise, noise
 
 def identity(ax):
     """ Plot the identity map y=x """
@@ -89,73 +77,6 @@ def save_mp4(frame_saver, settings):
                         )
                     )
 
-def noise_title(train_sigma, test_sigma):
-    """
-    Generate title showing amount of noise used 
-    during bootstrap training and testing
-    """
-    title = ''
-    if train_sigma != 0:
-        title += 'training noise'
-        title += r'$\sim\operatorname{Normal}(0,\sigma=%.1f)$' % train_sigma
-        title += '\n'
-    else:
-        title += 'no training noise\n'
-    if test_sigma != 0:
-        title += 'testing noise'
-        title += r'$\sim\operatorname{Normal}(0,\sigma=%.1f)$' % test_sigma
-    else:
-        title += 'no testing noise'
-    return title
-
-def rescale_thetas(theta_Phi, theta):
-    """
-    Rescales true and predicted thetas so the pred vs true plot
-    is bounded by -1 and 1
-    Returns rescaled theta_Phi and theta
-    """
-    # combine theta and theta_Phi to transform
-    thetas = np.hstack((theta, theta_Phi))
-    thetas_tformer = preprocessing.MaxAbsScaler()
-    thetas_tform = thetas_tformer.fit_transform(thetas)
-
-    # transformed thetas
-    theta = thetas_tform[:,:3]
-    theta_Phi = thetas_tform[:,3:]
-
-    return theta_Phi, theta
-
-def boot_stats(boot_data):
-    """
-    Given dictionary containing bootstrap data,
-    compute bootstrap means, 68%, and 95% credible regions
-    """
-    # compute means and quantiles 
-    _, results = zip(*boot_data.items())
-    boot_data = np.array(results)
-    stats = dict()
-    stats['means'] = np.mean(boot_data, axis=0)
-    stats['upper95'] = np.quantile(boot_data, 0.975, axis=0)
-    stats['upper68'] = np.quantile(boot_data, 0.84, axis=0)
-    stats['lower68'] = np.quantile(boot_data, 0.16, axis=0)
-    stats['lower95'] = np.quantile(boot_data, 0.025, axis=0)
-
-    # make errorbars
-    num_points = boot_data.shape[1]
-    err_shape = (2, num_points)
-    stats['credint95'] = [np.zeros(err_shape),
-                 np.zeros(err_shape),
-                 np.zeros(err_shape)]
-    stats['credint68'] = deepcopy(stats['credint95'])
-
-    for i in range(3):
-        stats['credint95'][i][0] = stats['upper95'][:,i] - stats['means'][:,i]
-        stats['credint95'][i][1] = stats['means'][:,i] - stats['lower95'][:,i]
-        stats['credint68'][i][0] = stats['upper68'][:,i] - stats['means'][:,i]
-        stats['credint68'][i][1] = stats['means'][:,i] - stats['lower68'][:,i]
-
-    return stats
-
 #############
 # SOLUTIONS #
 #############
@@ -187,7 +108,6 @@ def solution(domain, solution, theta):
 
 def theta_fit(Phi, theta_Phi, theta, 
         sigma=0, 
-        seed=23, 
         transform=True, 
         verbose=True):
     """
@@ -197,7 +117,6 @@ def theta_fit(Phi, theta_Phi, theta,
         theta_Phi - the test set theta
         theta - latent theta values
         sigma - standard deviation for normally distributed noise
-        seed - random seed for reprodicibility
         transorm - plot theta components on common scale
         verbose - prints mean square errors
     """
@@ -207,11 +126,12 @@ def theta_fit(Phi, theta_Phi, theta,
         print('theta MSE:', theta_mse)
 
     # initialize axes
-    plot_rows = 1
+    plot_cols = 1
     theta_len = theta_Phi.shape[1]
-    fig, ax = plt.subplots(plot_rows, theta_len,
+    fig, ax = plt.subplots(theta_len, 1,
             sharey=transform,
-            figsize=(20,10*plot_rows))
+            sharex=transform,
+            figsize=(20,20))
 
     # plot transformed thetas
     if transform:
@@ -232,13 +152,16 @@ def subplot_theta_fit(fig, ax, theta_Phi, theta):
     theta_names = ['$c$', '$b_0$', '$b_1$']
     num_plots = len(ax)
     for i in range(num_plots):
-        ax[i].scatter(theta_Phi[:,i], theta[:,i],
-                alpha=0.7)
-        ax[i].set_title(theta_names[i], fontsize=26)
-        identity(ax[i])
+        resids = theta[:,i] - theta_Phi[:,i]
+        xmin = 1.1 * np.min(theta_Phi[:,i])
+        xmax = 1.1 * np.max(theta_Phi[:,i])
+        ax[i].scatter(theta_Phi[:,i], resids,
+                alpha=0.7, label=theta_names[i] + ' predictions')
+        ax[i].plot([xmin, xmax], [0,0], lw=3, c='k', ls='dashed')
+        ax[i].legend(loc='upper left', fontsize=20)
     suptitle(fig, '')
     plt.xlabel('Truth', fontsize=26)
-    plt.ylabel('Prediction', fontsize=26, labelpad=40.0)
+    plt.ylabel('Residuals', fontsize=26, labelpad=40.0)
 
 def solution_fit(Phi, noise, theta_Phi, theta, u_theta, 
         sigma=0, 
@@ -305,36 +228,69 @@ def solution_fit(Phi, noise, theta_Phi, theta, u_theta,
 # BOOTSTRAPPING #
 #################
 
-def theta_boot(test, boot_data, sigmas):
-    """ Plot bootstrap results in parameter space """
+def theta_boot(test, boot_data, sigmas, se='bootstrap', verbose=False):
+    """ Plot bootstrap results in parameter space, resids vs truth """
     # compute bootstrap means and confidence bounds
     test_theta = deepcopy(test[1]) # ground truth test theta
-    num_boots = len(boot_data)
-    stats = boot_stats(boot_data)
+    stats = boot_stats(boot_data, test_theta)
+    theta_Phi = stats['rescaled_true_theta']
+    param = ['$c$', '$b_0$', '$b_1$']
+    if verbose:
+        print('%d intervals' % len(test_theta))
 
     # errorbar plots
-    fig, ax = plt.subplots(3,1, figsize=(20,20))
-    param = [r'$c$', r'$b_0$', r'$b_1$']
-    train_sigma, test_sigma = sigmas
+    fig, ax = plt.subplots(3,1, figsize=(20,20), sharex=True, sharey=True)
     for i in range(3):
         # plot bootstrap means
-        ax[i].scatter(test_theta[:,i], stats['means'][:,i], 
-                label=param[i] + ' boot means')
+        resids_means = stats['means'][:,i]
+
+        # errors
+        if se == 'bootstrap':
+            errs = 2. * stats['SE'][:,i]
+            upper = resids_means + errs 
+            lower = resids_means - errs
+        elif se == 'quantile':
+            errs = stats['credint95'][i]
+            upper = stats['upper95'][:,i]
+            lower = stats['lower95'][:,i]
+
+        # count intervals containing zero
+        below = (upper < 0)
+        above = (lower > 0)
+        outside = below + above
+        num_outside = np.sum(outside, axis=0)
+        percent_outside = 100. * num_outside / len(test_theta)
+        if verbose:
+            msg = '%d ' % num_outside
+            msg += r'' + param[i] + ' intervals (%.2f%%) ' % percent_outside
+            msg += 'do not contain 0'
+            print(msg)
+        colors = ['r' if out else 'C0' for out in outside]
+        
+        ax[i].scatter(theta_Phi[:,i], resids_means, 
+                label=param[i] + ' boot means', c=colors, alpha=0.7)
         # plot bootstrap credible regions
-        ax[i].errorbar(test_theta[:,i], stats['means'][:,i], 
-                yerr=stats['credint95'][i],
+        ax[i].errorbar(theta_Phi[:,i], resids_means, 
+                yerr=errs,
+                ecolor=colors,
                 alpha=0.25,
                 fmt='|',
                 label='95% credible region')
-        # y=x
-        identity(ax[i])
-        ax[i].set_ylabel('Predictions')
-        ax[i].legend(loc='upper left', fontsize=26)
+        # y=0
+        xmin = np.min(theta_Phi[:,i])
+        xmax = np.max(theta_Phi[:,i])
+        ax[i].plot([xmin, xmax], [0,0], 
+                c='k', 
+                lw=3, 
+                ls='dashed')
+        ax[i].set_ylabel('Residuals')
+        ax[i].legend(loc='upper left', fontsize=20)
     ax[2].set_xlabel('Truth')
+    train_sigma, test_sigma = sigmas
     title = noise_title(train_sigma, test_sigma)
     suptitle(fig, title, pad=20)
 
-def solution_boot(test, boot_data, u_from_theta, sigmas):
+def solution_boot(test, boot_data, u_from_theta, sigmas, se='bootstrap'):
     """
     Plot bootstrap results for a sample of 9 solutions
     For each Phi in the sample, plots:
@@ -358,11 +314,22 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
     sample_idx = np.random.randint(0, len(Phi)-1, num_plots)
     Phi = Phi[sample_idx]
     noise = noise[sample_idx]
-    means = u_from_theta(stats['means'][sample_idx])
-    upper95 = u_from_theta(stats['upper95'][sample_idx])
-    lower95 = u_from_theta(stats['lower95'][sample_idx])
-    upper68 = u_from_theta(stats['upper68'][sample_idx])
-    lower68 = u_from_theta(stats['lower68'][sample_idx])
+    theta_means = stats['means'][sample_idx]
+    means = u_from_theta(theta_means)
+    if se == 'bootstrap':
+        up95 = theta_means + 2. * stats['SE_boot'][sample_idx]
+        lo95 = theta_means - 2. * stats['SE_boot'][sample_idx]
+        upper95 = u_from_theta(up95)
+        lower95 = u_from_theta(lo95)
+        up68 = theta_means + stats['SE_boot'][sample_idx]
+        lo68 = theta_means - stats['SE_boot'][sample_idx]
+        upper68 = u_from_theta(up68)
+        lower68 = u_from_theta(lo68)
+    else:
+        upper95 = u_from_theta(stats['upper95'][sample_idx])
+        lower95 = u_from_theta(stats['lower95'][sample_idx])
+        upper68 = u_from_theta(stats['upper68'][sample_idx])
+        lower68 = u_from_theta(stats['lower68'][sample_idx])
 
     # for indexing plot grid
     idx = np.array([x for x in range(num_plots)]).reshape(3, 3)
@@ -433,7 +400,7 @@ def solution_boot(test, boot_data, u_from_theta, sigmas):
 # ADJOINT GRADIENT DESCENT #
 ############################
 
-class AdjointDescent:
+class AdjointPlotter:
     """
     Plotter class for adjoint equation gradient descent.
     Last line of AdjClass.descend() should be

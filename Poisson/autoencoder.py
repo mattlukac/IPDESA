@@ -4,8 +4,8 @@ import tensorflow as tf
 from tensorflow.random import set_seed
 from tensorflow.keras.layers import *
 from sklearn import preprocessing
-from . import equation, plotter
-from .bootstrapper import bootstrap
+from . import equation, plotter, tools
+from .bootstrapper import ensemble_bootstrap, parametric_bootstrap
 
 
 class AnalyticAutoEncoder:
@@ -104,9 +104,9 @@ class AnalyticAutoEncoder:
         print('Latent theta MSE:', theta_test_mse)
 
 
-################
-# PLOT METHODS #
-################
+    ################
+    # PLOT METHODS #
+    ################
 
     def plot_theta_fit(self, sigma=0, seed=23, transform=True, history=None):
         Phi, theta_Phi = self.noisify(self.test_data, sigma)
@@ -115,7 +115,6 @@ class AnalyticAutoEncoder:
         plotter.theta_fit(Phi, theta_Phi,
                           theta,
                           sigma,
-                          seed,
                           transform)
         plotter.show()
         
@@ -133,6 +132,139 @@ class AnalyticAutoEncoder:
                              seed)
         plotter.show()
     
+    #####################
+    # BOOTSTRAP METHODS #
+    #####################
+
+    def fitter(self, train):
+        """ Fits the model given training data """
+        self.build_model()
+        self.model.fit(train[0], train[0],
+                batch_size=self.batch_size, 
+                epochs=self.batch_size, 
+                verbose=0)
+
+    def evaluater(self, test):
+        """ Evaluates fitted model given test data """
+        test_loss = self.model.evaluate(test[0], test[0], verbose=0)
+        return test_loss
+    
+    def predicter(self, test):
+        """ Predicts on fitted model given test data """
+        Phi = test[0]
+        return self.get_theta(Phi).numpy()
+
+    def ensemble_bootstrap(self, num_boots, train_sigma=0, test_sigma=0, size=0.6):
+        """
+        Performs num_boots bootstrap iterations 
+        with sample 60% of original size
+        Train on noisy data with stdev train_sigma
+        Test on noisy data with stdev test_sigma
+        """
+        # add noise to train inputs
+        train_data = self.noisify(self.train_data, train_sigma, seed=2)
+
+        # add noise to test inputs
+        test_data = self.noisify(self.test_data, test_sigma)
+
+        # save noisy data and sigmas
+        data = (train_data, test_data)
+        self.train_sigma = train_sigma
+        self.test_sigma = test_sigma
+
+        print('Bootstrapping with %d boot samples' % num_boots)
+        results = ensemble_bootstrap(num_boots, 
+                data,
+                self.fitter,
+                self.evaluater,
+                self.predicter,
+                size) 
+        print('done')
+        self.boot_evals, self.boot_preds = results
+
+    def plot_ensemble_theta_boot(self, se='bootstrap', verbose=False):
+        """
+        Plots predicted vs true thetas from bootstrapping results
+        Inputs to theta_boot():
+          self.test_data - used for ground truth thetas
+          self.boot_preds - bootstrap results, has noise info built in
+          sigmas - purely for the title of the plot
+        """
+        plotter.theta_boot(
+                self.test_data, 
+                self.boot_preds, 
+                [self.train_sigma, self.test_sigma],
+                se,
+                verbose)
+        plotter.show()
+
+    def plot_ensemble_solution_boot(self):
+        """
+        Plots true solution curves with bootstrap credible regions
+        Inputs to solution_boot():
+          self.test_data - ground truth information
+          self.boot_preds - contains bootstrap results
+          self.u_from_theta - reconstructed Phi given theta
+          sigmas - used in plot title
+        """
+        plotter.solution_boot(self.test_data, 
+                self.boot_preds, 
+                self.u_from_theta,
+                [self.train_sigma, self.test_sigma])
+        plotter.show()
+
+    def parametric_bootstrap(self,
+             num_boots, 
+             train_sigma=0, 
+             test_sigma=0, 
+             seed=23):
+        """
+        Using a single trained network, we
+          1) predict parameters theta
+          2) simulate data from these parameters
+          3) predict with simulated data
+          4) get confidence intervals from empirical distribution of these errors
+        To simulate data we will (deterministically) map theta -> u
+        and then throw noise on top of u many times.
+        """
+        # add noise to train inputs
+        x_train, y_train = deepcopy(self.train_data)
+        x_train, noise = tools.add_noise(x_train, train_sigma, seed=2)
+        train_data = (x_train, y_train)
+
+        # get test data
+        test_data = deepcopy(self.test_data)
+
+        # save noisy data and sigmas
+        data = (train_data, test_data)
+        self.train_sigma = train_sigma
+        self.test_sigma = test_sigma
+        print('train and test sigmas:', self.train_sigma, self.test_sigma)
+
+        print('performing parametric bootstrapping...')
+        theta_hats = parametric_bootstrap(
+                num_boots,
+                data,
+                self.fitter,
+                self.evaluater,
+                self.predicter,
+                test_sigma,
+                seed)
+        print('done')
+        self.parametric_boot_thetas = theta_hats
+
+    def plot_parametric_theta_boot(self, se='quantile', verbose=False):
+        plotter.theta_boot(
+                self.test_data,
+                self.parametric_boot_thetas,
+                [self.train_sigma, self.test_sigma],
+                se,
+                verbose)
+
+    ###############
+    # MP4 METHODS #
+    ###############
+
     def save_theta_epochs_frame(self, frame_num):
         theta_frame = self.theta_history.epochs[frame_num]
         Phi, theta_Phi = deepcopy(self.test_data)
@@ -160,7 +292,7 @@ class AnalyticAutoEncoder:
     def solution_fit_sample(self, sigma=0):
         # get Phi, theta_Phi, theta
         Phi, theta_Phi = deepcopy(self.test_data)
-        Phi, noise = plotter.add_noise(Phi, sigma)
+        Phi, noise = tools.add_noise(Phi, sigma)
         
         num_plots = 9
         # get sample
@@ -204,87 +336,9 @@ class AnalyticAutoEncoder:
 
         plotter.save_mp4(save_frame, settings)
         
-#####################
-# BOOTSTRAP METHODS #
-#####################
-
-    def fitter(self, train):
-        """ Fits the model given training data """
-        self.build_model()
-        self.model.fit(train[0], train[0],
-                batch_size=self.batch_size, 
-                epochs=self.batch_size, 
-                verbose=0)
-
-    def evaluater(self, test):
-        """ Evaluates fitted model given test data """
-        test_loss = self.model.evaluate(test[0], test[0], verbose=0)
-        return test_loss
-    
-    def predicter(self, test):
-        """ Predicts on fitted model given test data """
-        Phi = test[0]
-        return self.get_theta(Phi).numpy()
-
-    def bootstrap(self, num_boots, train_sigma=0, test_sigma=0, size=0.6):
-        """
-        Performs num_boots bootstrap iterations 
-        with sample 60% of original size
-        Train on noisy data with stdev train_sigma
-        Test on noisy data with stdev test_sigma
-        """
-        # add noise to train inputs
-        train_data = self.noisify(self.train_data, train_sigma, seed=2)
-
-        # add noise to test inputs
-        test_data = self.noisify(self.test_data, test_sigma)
-
-        # save noisy data and sigmas
-        data = (train_data, test_data)
-        self.train_sigma = train_sigma
-        self.test_sigma = test_sigma
-
-        print('Bootstrapping with %d boot samples' % num_boots)
-        results = bootstrap(num_boots, 
-                data,
-                self.fitter,
-                self.evaluater,
-                self.predicter,
-                size) 
-        print('done')
-        self.boot_evals, self.boot_preds = results
-
-    def plot_theta_boot(self):
-        """
-        Plots predicted vs true thetas from bootstrapping results
-        Inputs to theta_boot():
-          self.test_data - used for ground truth thetas
-          self.boot_preds - bootstrap results, has noise info built in
-          sigmas - purely for the title of the plot
-        """
-        plotter.theta_boot(self.test_data, 
-                self.boot_preds, 
-                [self.train_sigma, self.test_sigma])
-        plotter.show()
-
-    def plot_solution_boot(self):
-        """
-        Plots true solution curves with bootstrap credible regions
-        Inputs to solution_boot():
-          self.test_data - ground truth information
-          self.boot_preds - contains bootstrap results
-          self.u_from_theta - reconstructed Phi given theta
-          sigmas - used in plot title
-        """
-        plotter.solution_boot(self.test_data, 
-                self.boot_preds, 
-                self.u_from_theta,
-                [self.train_sigma, self.test_sigma])
-        plotter.show()
-
-################
-# MISC METHODS #
-################
+    ################
+    # MISC METHODS #
+    ################
 
     def theta_from_Phi(self, Phi):
         """ Predict theta given Phi """
@@ -301,7 +355,7 @@ class AnalyticAutoEncoder:
     def noisify(self, data, sigma, seed=23):
         """ Add noise to input of data """
         x, y = deepcopy(data)
-        x, noise = plotter.add_noise(x, sigma, seed)
+        x, noise = tools.add_noise(x, sigma, seed)
         data_with_noise = (x, y)
         return data_with_noise
 

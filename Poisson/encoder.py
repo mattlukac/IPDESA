@@ -3,12 +3,13 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 from tensorflow.keras.layers import *
 from tensorflow.keras import Model
 from tensorflow.keras.callbacks import TensorBoard, LearningRateScheduler
+from tensorflow.random import set_seed
 from sklearn import preprocessing 
 from copy import deepcopy
 import numpy as np
 import datetime
-from . import equation, plotter
-from .bootstrapper import bootstrap
+from . import equation, plotter, tools
+from .bootstrapper import ensemble_bootstrap, parametric_bootstrap
 
 
 class Encoder:
@@ -61,6 +62,7 @@ class Encoder:
                         self.activations[layer][1])(Phi)
             # other hidden layers
             elif layer < self.num_layers - 1:
+#                x = LeakyReLU()(x)
                 x = Dropout(self.drops[layer-1])(x)
                 x = Dense(self.activations[layer][0],
                         self.activations[layer][1])(x)
@@ -74,7 +76,7 @@ class Encoder:
         self.model.compile(self.optim, self.loss)
 
     ## TRAIN THE MODEL
-    def train(self, verbose=0, sigma=0, transform=False):
+    def train(self, verbose=0, sigma=0, seed=23, transform=False):
         """
         Compiles the model, prints a summary, fits to data
         The boolean transform rescales the data if True (default),
@@ -87,8 +89,8 @@ class Encoder:
         Phi_val, theta_Phi_val = deepcopy(self.val_data)
         
         # add noise
-        Phi_train, train_noise = plotter.add_noise(Phi_train, sigma, seed=2)
-        Phi_val, val_noise = plotter.add_noise(Phi_val, sigma, seed=3)
+        Phi_train, train_noise = tools.add_noise(Phi_train, sigma, seed=2)
+        Phi_val, val_noise = tools.add_noise(Phi_val, sigma, seed=3)
 
         self.transformed = transform
         if transform:
@@ -105,6 +107,7 @@ class Encoder:
             theta_Phi_val = theta_Phi_val_tformer.fit_transform(theta_Phi_val)
 
         # compile and print summary
+        set_seed(seed)
         self.build_model()
         self.model.summary()
 
@@ -116,6 +119,8 @@ class Encoder:
                  epochs = self.epochs,
                  callbacks = callbacks,
                  verbose=verbose)
+        print('test mse:', self.model.evaluate(self.test_data[0], self.test_data[1]))
+        print('test thetas:', self.model.predict(self.test_data[0]))
         
 ####################
 # PLOTTING METHODS #
@@ -132,12 +137,11 @@ class Encoder:
 
     def plot_theta_fit(self, sigma=0, seed=23, transform=True):
         Phi, theta_Phi = deepcopy(self.test_data)
-        Phi, _ = plotter.add_noise(Phi, sigma)
+        Phi, _ = tools.add_noise(Phi, sigma, seed)
         theta = self.theta_from_Phi(Phi)
 
         plotter.theta_fit(Phi, theta_Phi, 
                           theta, 
-                          sigma, 
                           seed,
                           transform)
         plotter.show()
@@ -160,7 +164,7 @@ class Encoder:
     def solution_fit_sample(self, sigma=0):
         # get Phi, theta_Phi, theta
         Phi, theta_Phi = deepcopy(self.test_data)
-        Phi, noise = plotter.add_noise(Phi, sigma)
+        Phi, noise = tools.add_noise(Phi, sigma)
 
         num_plots = 9
         # get sample
@@ -172,9 +176,7 @@ class Encoder:
 # BOOTSTRAP PLOT METHODS #
 ##########################
     def fitter(self, train):
-        """
-        Fits the model given some training data
-        """
+        """ Fits the model given some training data """
         self.build_model()
         self.model.fit(x=train[0], y=train[1],
                  batch_size=self.batch_size,
@@ -182,19 +184,15 @@ class Encoder:
                  verbose=0)
 
     def evaluater(self, test):
-        """
-        Evaluates a trained model with test data
-        """
+        """ Evaluates a trained model with test data """
         test_loss = self.model.evaluate(test[0], test[1], verbose=0)
         return test_loss
 
     def predicter(self, test):
-        """
-        Predicts with a trained model on test data
-        """
+        """ Predicts with a trained model on test data """
         return self.model.predict(test[0])
 
-    def bootstrap(self, num_boots, train_sigma=0, test_sigma=0, size=0.6):
+    def ensemble_bootstrap(self, num_boots, train_sigma=0, test_sigma=0, size=0.6):
         """
         Generates num_boots bootstrap samples,
         fits a model to each sample,
@@ -204,12 +202,12 @@ class Encoder:
         """
         # add noise to train inputs
         x_train, y_train = deepcopy(self.train_data)
-        x_train, noise = plotter.add_noise(x_train, train_sigma, seed=2)
+        x_train, noise = tools.add_noise(x_train, train_sigma, seed=2)
         train_data = (x_train, y_train)
 
         # add noise to test inputs
         x_test, y_test = deepcopy(self.test_data)
-        x_test, noise = plotter.add_noise(x_test, test_sigma) 
+        x_test, noise = tools.add_noise(x_test, test_sigma) 
         test_data = (x_test, y_test)
 
         # save noisy data and sigmas
@@ -219,7 +217,8 @@ class Encoder:
 
         samp_size = int(size * len(x_train))
         print('Bootstrapping with %d samples of size %d' % (num_boots, samp_size))
-        results = bootstrap(num_boots, 
+        results = ensemble_bootstrap(
+                num_boots, 
                 data, 
                 self.fitter, 
                 self.evaluater, 
@@ -228,17 +227,68 @@ class Encoder:
         print('done')
         self.boot_evals, self.boot_preds = results
 
-    def plot_theta_boot(self):
+    def parametric_bootstrap(self,
+            num_boots, 
+            train_sigma=0, 
+            test_sigma=0,
+            seed=23):
+        """
+        Using a single trained network, we
+          1) predict parameters theta
+          2) simulate data from these parameters
+          3) predict with simulated data
+          4) get confidence intervals from empirical distribution of these errors
+        To simulate data we will (deterministically) map theta -> u
+        and then throw noise on top of u many times.
+        """
+        # add noise to train inputs
+        x_train, y_train = deepcopy(self.train_data)
+        x_train, noise = tools.add_noise(x_train, train_sigma, seed=2)
+        train_data = (x_train, y_train)
+
+        # get test data
+        test_data = deepcopy(self.test_data)
+
+        # save noisy data and sigmas
+        data = (train_data, test_data)
+        self.train_sigma = train_sigma
+        self.test_sigma = test_sigma
+        print('train and test sigmas:', self.train_sigma, self.test_sigma)
+
+        print('performing parametric bootstrapping...')
+        theta_hats = parametric_bootstrap(
+                num_boots, 
+                data, 
+                self.fitter, 
+                self.evaluater,
+                self.predicter,
+                test_sigma,
+                seed)
+        print('done')
+        self.parametric_boot_thetas = theta_hats
+
+    def plot_ensemble_theta_boot(self, se='bootstrap', verbose=False):
         """
         Plots bootstrap means vs true theta values
         with 95% credible region errorbars
         """
-        plotter.theta_boot(self.test_data, 
+        plotter.theta_boot(
+                self.test_data, 
                 self.boot_preds, 
-                [self.train_sigma, self.test_sigma])
+                [self.train_sigma, self.test_sigma],
+                se,
+                verbose)
         plotter.show()
 
-    def plot_solution_boot(self):
+    def plot_parametric_theta_boot(self, se='quantile', verbose=False):
+        plotter.theta_boot(
+                self.test_data, 
+                self.parametric_boot_thetas,
+                [self.train_sigma, self.test_sigma],
+                se,
+                verbose)
+
+    def plot_solution_boot(self, se='bootstrap'):
         """
         Plots mean bootstrap solution curve bounded above and below
         by the credible intervals.
@@ -246,7 +296,8 @@ class Encoder:
         plotter.solution_boot(self.test_data, 
                 self.boot_preds, 
                 self.u_from_theta,
-                [self.train_sigma, self.test_sigma])
+                [self.train_sigma, self.test_sigma],
+                se)
         plotter.show()
 
 

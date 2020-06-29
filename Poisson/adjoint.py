@@ -217,7 +217,7 @@ class PoissonBC:
             self.solutions[i] = self.get_solution(theta).flatten()
 
         # pass grad descent data to plotter
-        self.plt = plotter.AdjointDescent(self)
+        self.plt = plotter.AdjointPlotter(self)
 
     ####################
     # PLOTTING METHODS #
@@ -367,7 +367,7 @@ class PoissonLBC(PoissonBC):
             self.solutions[i] = self.get_solution(theta).flatten()
 
         # pass descent data to plotter
-        self.plt = plotter.AdjointDescent(self)
+        self.plt = plotter.AdjointPlotter(self)
 
     ################
     # PLOT METHODS #
@@ -561,7 +561,7 @@ class Poisson(PoissonBC):
             self.solutions[i] = self.get_solution(theta).flatten()
 
         # pass descent data to plotter
-        self.plt = plotter.AdjointDescent(self)
+        self.plt = plotter.AdjointPlotter(self)
 
     ################
     # PLOT METHODS #
