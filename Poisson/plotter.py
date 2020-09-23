@@ -144,20 +144,33 @@ def theta_fit(Phi, theta_Phi, theta,
 
     subplot_theta_fit(fig, ax, theta_Phi, theta)
 
-def subplot_theta_fit(fig, ax, theta_Phi, theta):
+def subplot_theta_fit(fig, ax, theta_Phi, theta=None, resids=None):
     """
     Plots theta vs theta_Phi
     Agnostic to data transformation
     """
     theta_names = ['$c$', '$b_0$', '$b_1$']
     num_plots = len(ax)
+
+    # scientific notation for residuals
+    formatter = mticker.ScalarFormatter(useMathText=True)
+    formatter.set_scientific(True)
+    formatter.set_powerlimits((0,0))
+
+    # compute residuals if not given
+    if resids is None:
+        resids = theta - theta_Phi
+    ymin = np.min(resids) * 1.25
+    ymax = np.max(resids) * 1.25
     for i in range(num_plots):
-        resids = theta[:,i] - theta_Phi[:,i]
+        residuals = resids[:,i]
         xmin = 1.1 * np.min(theta_Phi[:,i])
         xmax = 1.1 * np.max(theta_Phi[:,i])
-        ax[i].scatter(theta_Phi[:,i], resids,
+        ax[i].set_ylim(ymin, ymax)
+        ax[i].scatter(theta_Phi[:,i], residuals,
                 alpha=0.7, label=theta_names[i] + ' predictions')
         ax[i].plot([xmin, xmax], [0,0], lw=3, c='k', ls='dashed')
+        ax[i].yaxis.set_major_formatter(formatter)
         ax[i].legend(loc='upper left', fontsize=20)
     suptitle(fig, '')
     plt.xlabel('Truth', fontsize=26)

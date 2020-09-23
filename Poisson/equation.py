@@ -40,11 +40,14 @@ class Dataset:
             u[i] = self.solution(theta)
         return u
 
-    def simulate(self, replicates):
+    def simulate(self, replicates, name=None):
         """
         Uses Equation attributes to simulate a dataset
         with size replicates and save data to a pickle
         """
+        if name is None:
+            name = self.name
+
         # simulate the data
         thetas = self.theta(replicates)
         u = self.vectorize_u(thetas)
@@ -57,7 +60,7 @@ class Dataset:
         the_data = (u, thetas)
         if not os.path.exists('data/'):
             os.mkdir('data')
-        the_pickle = open('data/%s.pkl' % self.name, 'wb')
+        the_pickle = open('data/%s.pkl' % name, 'wb')
         pickle.dump(the_data, the_pickle)
         the_pickle.close()
 
