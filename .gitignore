@@ -12,9 +12,12 @@ notebooks/
 visuals/
 tests/
 logs/
+lightning_logs/
 data/*
 keynotes/
 fenics_tutorials/
 fenics_scripts/
 equations/__pycache__
 Poisson/__pycache__
+Poisson/adjoint/
+Poisson/trashbin/
