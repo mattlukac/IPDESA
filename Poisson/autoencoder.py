@@ -1,394 +1,308 @@
-import numpy as np 
-from copy import deepcopy
-import tensorflow as tf
-from tensorflow.random import set_seed
-from tensorflow.keras.layers import *
-from sklearn import preprocessing
-from . import equation, plotter, tools
-from .bootstrapper import ensemble_bootstrap, parametric_bootstrap
+import numpy as np
+import os 
+import matplotlib.pyplot as plt
+from Poisson.plotter import subplot_theta_fit
+
+# torch imports
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+from torch.optim import Adam, SGD
+from torch.optim.lr_scheduler import StepLR, CyclicLR
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint
+
+# fenics imports 
+from fenics import *
+from fenics_adjoint import *
 
 
-class AnalyticAutoEncoder:
+class PoissonSolver:
+    """ Solves the 1D Poisson equation """
 
-    def __init__(self, epochs=20, batch_size=25, lr=0.001):
-        # model attributes
-        self.epochs = epochs 
-        self.batch_size = batch_size
-        self.lr = lr
-        self.optimizer = tf.keras.optimizers.Adam(lr)
+    def __init__(self):
+        # creates mesh, function space, and LHS weak form
+        self.mesh = UnitIntervalMesh(99)
+        self.V = FunctionSpace(self.mesh, 'P', 1)
+        self.dofs = self.V.dofmap().dofs(self.mesh, 0)
+        u = TrialFunction(self.V)
+        self.v = TestFunction(self.V)
+        self.a = inner(grad(u), grad(self.v)) * dx
+
+    def solve(self, theta):
+        """ Solves Poisson equation given parameters """
+
+        c, b0, b1 = theta
+        c = Constant(c)
+        L = c * self.v * dx
+
+        # Define boundary condition
+        u_D = Expression('x[0] == 0 ? b0: b1',
+                        b0 = b0,
+                        b1 = b1,
+                        degree = 1)
+        bd_vals = Function(self.V)
+        bd_vals.assign(project(u_D, self.V))
+        bc = DirichletBC(self.V, bd_vals, 'on_boundary')
+
+        # Compute solution
+        u = Function(self.V)
+        solve(self.a == L, u, bc)
+        controls = [Control(c), Control(bd_vals)]
+        return u, controls 
+
+    def forward(self, theta_batch):
+        """ Batch solutions to Poisson equation """
+
+        batch_solns = dict()
+        self.controls = dict()
+        self.solns = dict()
+
+        if isinstance(theta_batch, torch.Tensor):
+            theta_array = theta_batch.clone().numpy()
+
+        if theta_batch.ndim == 1:
+            self.solns[0], self.controls[0] = self.solve(theta_array)
+            batch_solns[0] = self.solns[0].compute_vertex_values(self.mesh)
+        else:
+            batch_size = theta_array.shape[0]
+            
+            # compute batch solutions
+            for idx, theta in enumerate(theta_array):
+                u, self.controls[idx] = self.solve(theta)
+                self.solns[idx] = u
+                batch_solns[idx] = u.compute_vertex_values(self.mesh)
+
+        np_solns = np.array([u for u in batch_solns.values()])
+        return torch.tensor(np_solns, dtype=torch.float)
+
+    def backward(self, Phi_batch):
+        """ Compute batch gradients dJ/dtheta """
+
+        def solve_adjoint(out, data, controls):
+            # Compute L2 loss
+            Phi = Function(self.V)
+            Phi.vector().set_local(data[self.dofs])
+            J = assemble(0.5 * inner(out - Phi, out - Phi) * dx)
+
+            # compute loss gradient
+            dJdc, dJdb = compute_gradient(J, controls)
+            dJdc = dJdc.values().item()
+
+            # convert grads to scalars
+            dJdb = dJdb.compute_vertex_values(self.mesh)
+            grads = [dJdc, dJdb[0], dJdb[-1]]
+            return grads
+
+        grads = dict()
+        if isinstance(Phi_batch, torch.Tensor):
+            Phi_batch = Phi_batch.detach().numpy()
+
+        if Phi_batch.ndim == 1:
+            batch_size = 1
+            Phi_batch = np.expand_dims(Phi_batch, axis=0)
+        else:
+            batch_size = Phi_batch.shape[0]
+        for idx in range(batch_size):
+            grads[idx] = solve_adjoint(self.solns[idx], 
+                                       Phi_batch[idx], 
+                                       self.controls[idx])
+
+        grads = np.array([x for x in grads.values()])
+        return grads
+
+
+class TorchFenicsSolver(torch.autograd.Function):
+    """
+    PDE solver layer that takes theta as input,
+    the forward pass solves the Poisson equation
+    and computes L2 loss J as output.
+
+    The backward pass computes dJ/dtheta
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def forward(ctx, theta, Phi, solver):
+        out = solver.forward(theta)
+        ctx.Phi = Phi
+        ctx.solver = solver
+        return out
+
+    @staticmethod
+    def backward(ctx, dout):
+        Phi = ctx.Phi
+        solver = ctx.solver
+        dtheta = torch.tensor(solver.backward(Phi))
+        return dtheta, None, None
+
+
+class PoissonModel(pl.LightningModule):
+    """ Dense network connected to Poisson solver """
+    
+    def __init__(self, solver):
+        super().__init__()
+        self.solver = solver
+        self.linear1 = torch.nn.Linear(100, 20)
+        self.linear2 = torch.nn.Linear(20, 3)
+        self.fenics_solver = TorchFenicsSolver()
+        self.example_input_array = torch.zeros(1, 100)
+        self.batch_loss = None # used in progress bar
+        self.train_history = dict()
+        self.valid_history = dict()
         
-        # load data
-        data = equation.Dataset('poisson')
-        data.load()
-        self.domain = data.domain()
-        self.train_data = data.train
-        self.val_data = data.validate
-        self.test_data = data.test 
-        self.get_solution = data.vectorize_u
-
-    def decoder(self, theta):
-        """ Tensor operations to calculate analytic solution """
-        c, b0, b1 = tf.split(theta, 3, axis=1)
-        # x and x^2
-        x = np.linspace(0., 1., 100)
-        x2 = x ** 2
-        # -c/2 x^2
-        ux2 = tf.math.divide(c, -2.)
-        ux2 = tf.math.multiply(ux2, x2)
-        # (c/2 + b1 - b0) x
-        ux = tf.math.divide(c, 2.)
-        ux = tf.math.add(ux, b1)
-        ux = tf.math.subtract(ux, b0)
-        ux = tf.math.multiply(ux, x)
-        # b0
-        u = tf.math.add(ux2, ux)
-        u = tf.math.add(u, b0)
+    def forward(self, inputs):
+        inputs = inputs[0] if len(inputs) == 1 else inputs
+        x = self.linear1(inputs)
+        self.theta = self.linear2(x)
+        u = self.fenics_solver.apply(self.theta, inputs, self.solver)
         return u
-
-    def build_model(self):
-        """ Builds autoencoder and method to extract latent theta """
-        # use eager tensors
-        tf.config.experimental_run_functions_eagerly(True)
-
-        # network parameters 
-        input_shape = self.train_data[0].shape[1]
-        latent_dim = self.train_data[1].shape[1]
-
-        # encoder and decoder
-        Phi = Input(shape=input_shape)
-        x = Dense(20, 'linear', name='hidden')(Phi)
-        theta = Dense(latent_dim, 'linear', name='theta')(x)
-        u = Lambda(self.decoder, name='u')(theta)
-
-        # build model
-        self.model = tf.keras.Model(Phi, u)
-        self.model.compile(self.optimizer, 'mse')
-
-        # model that extracts latent theta
-        self.get_theta = tf.keras.Model(self.model.input, 
-                self.model.get_layer('theta').output)
-
-    def train(self, sigma=0, seed=23, verbose=0):
-        # add noise to data
-        train_data = self.noisify(self.train_data, sigma, seed=2)
-        val_data = self.noisify(self.val_data, sigma, seed=3)
-        test_data = self.noisify(self.test_data, sigma)
-
-        # make the network
-        set_seed(seed)
-        self.build_model()
-
-        self.theta_history = LatentThetaHistory(self.test_data[0])
-
-        # train and print losses
-        print('training...')
-        self.model.fit(x=train_data[0], y=train_data[0],
-                       validation_data=(val_data[0], val_data[0]),
-                       epochs=self.epochs,
-                       batch_size=self.batch_size,
-                       verbose=verbose, 
-                       callbacks=[self.theta_history])
-        print('--------')
-        print('Reconstructed Phi MSE')
-        print('Training:', 
-                self.model.evaluate(train_data[0], train_data[0], verbose=0))
-        print('Validation:',
-                self.model.evaluate(val_data[0], val_data[0], verbose=0))
-        print('Test:',
-                self.model.evaluate(test_data[0], test_data[0], verbose=0))
-        
-        # extract latent space theta and compute MSE
-        theta_test = self.theta_from_Phi(test_data[0])
-        theta_test_mse = np.mean((theta_test - test_data[1]) ** 2, axis=0)
-        print('--------')
-        print('Latent theta MSE:', theta_test_mse)
-
-
-    ################
-    # PLOT METHODS #
-    ################
-
-    def plot_theta_fit(self, sigma=0, seed=23, transform=True, history=None):
-        Phi, theta_Phi = self.noisify(self.test_data, sigma)
-        theta = self.theta_from_Phi(Phi)
-
-        plotter.theta_fit(Phi, theta_Phi,
-                          theta,
-                          sigma,
-                          transform)
-        plotter.show()
-        
-    def plot_solution_fit(self, sigma=0, seed=23):
-        _, theta_Phi = deepcopy(self.test_data)
-        Phi, noise, sample = self.solution_fit_sample(sigma)
-        theta_Phi = theta_Phi[sample]
-        theta = self.theta_from_Phi(Phi)
-        u_theta = self.u_from_Phi(Phi)
-        
-        plotter.solution_fit(Phi, noise, theta_Phi,
-                             theta,
-                             u_theta,
-                             sigma, 
-                             seed)
-        plotter.show()
     
-    #####################
-    # BOOTSTRAP METHODS #
-    #####################
-
-    def fitter(self, train):
-        """ Fits the model given training data """
-        self.build_model()
-        self.model.fit(train[0], train[0],
-                batch_size=self.batch_size, 
-                epochs=self.batch_size, 
-                verbose=0)
-
-    def evaluater(self, test):
-        """ Evaluates fitted model given test data """
-        test_loss = self.model.evaluate(test[0], test[0], verbose=0)
-        return test_loss
+    def configure_optimizers(self):
+        optimizer = Adam(self.parameters(), lr=0.01)
+        scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
+        return [optimizer], [scheduler]
     
-    def predicter(self, test):
-        """ Predicts on fitted model given test data """
-        Phi = test[0]
-        return self.get_theta(Phi).numpy()
+    def training_step(self, batch, batch_idx):
+        u = self(batch)
+        Phi, = batch
+        loss = torch.nn.MSELoss()(u, Phi)
+        self.batch_loss = loss.detach().item()
+        result = pl.TrainResult(minimize=loss)
+        result.log('train_loss', loss)
+        return result
 
-    def ensemble_bootstrap(self, num_boots, train_sigma=0, test_sigma=0, size=0.6):
-        """
-        Performs num_boots bootstrap iterations 
-        with sample 60% of original size
-        Train on noisy data with stdev train_sigma
-        Test on noisy data with stdev test_sigma
-        """
-        # add noise to train inputs
-        train_data = self.noisify(self.train_data, train_sigma, seed=2)
+    def training_epoch_end(self, outputs):
+        """ Record training loss history """
+        loss = outputs['train_loss'].detach().mean()
+        self.train_history[self.current_epoch] = loss
+        return outputs
 
-        # add noise to test inputs
-        test_data = self.noisify(self.test_data, test_sigma)
+   # def validation_step(self, batch, batch_idx):
+   #     u = self(batch)
+   #     Phi, = batch
+   #     loss = torch.nn.MSELoss()(u, Phi)
+   #     return loss
 
-        # save noisy data and sigmas
-        data = (train_data, test_data)
-        self.train_sigma = train_sigma
-        self.test_sigma = test_sigma
+   # def validation_epoch_end(self, outputs):
+   #     """ Record validation loss history """
+   #     print(outputs)
+   #     loss = torch.tensor(outputs).mean()
+   #     self.valid_history[self.current_epoch] = loss
+   #     return outputs
 
-        print('Bootstrapping with %d boot samples' % num_boots)
-        results = ensemble_bootstrap(num_boots, 
-                data,
-                self.fitter,
-                self.evaluater,
-                self.predicter,
-                size) 
-        print('done')
-        self.boot_evals, self.boot_preds = results
+    def validation_step(self, batch, batch_idx):
+        u = self(batch)
+        Phi, = batch
+        loss = torch.nn.MSELoss()(u, Phi)
+        result = pl.EvalResult(checkpoint_on=loss)
+        result.log('val_loss', loss)
+        return result
 
-    def plot_ensemble_theta_boot(self, se='bootstrap', verbose=False):
-        """
-        Plots predicted vs true thetas from bootstrapping results
-        Inputs to theta_boot():
-          self.test_data - used for ground truth thetas
-          self.boot_preds - bootstrap results, has noise info built in
-          sigmas - purely for the title of the plot
-        """
-        plotter.theta_boot(
-                self.test_data, 
-                self.boot_preds, 
-                [self.train_sigma, self.test_sigma],
-                se,
-                verbose)
-        plotter.show()
+    def validation_epoch_end(self, outputs):
+        """ Record validation loss history """
+        loss = outputs['val_loss'].detach().mean()
+        self.valid_history[self.current_epoch] = loss
+        outputs['val_loss'] = loss
+        return outputs
 
-    def plot_ensemble_solution_boot(self):
-        """
-        Plots true solution curves with bootstrap credible regions
-        Inputs to solution_boot():
-          self.test_data - ground truth information
-          self.boot_preds - contains bootstrap results
-          self.u_from_theta - reconstructed Phi given theta
-          sigmas - used in plot title
-        """
-        plotter.solution_boot(self.test_data, 
-                self.boot_preds, 
-                self.u_from_theta,
-                [self.train_sigma, self.test_sigma])
-        plotter.show()
+    def get_progress_bar_dict(self):
+        """ This prints a more accurate loss in the progress bar """
+        tqdm_dict = super().get_progress_bar_dict()
+        tqdm_dict['loss'] = self.batch_loss
+        return tqdm_dict
 
-    def parametric_bootstrap(self,
-             num_boots, 
-             train_sigma=0, 
-             test_sigma=0, 
-             seed=23):
-        """
-        Using a single trained network, we
-          1) predict parameters theta
-          2) simulate data from these parameters
-          3) predict with simulated data
-          4) get confidence intervals from empirical distribution of these errors
-        To simulate data we will (deterministically) map theta -> u
-        and then throw noise on top of u many times.
-        """
-        # add noise to train inputs
-        x_train, y_train = deepcopy(self.train_data)
-        x_train, noise = tools.add_noise(x_train, train_sigma, seed=2)
-        train_data = (x_train, y_train)
+    def get_theta(self, Phi):
+        if not isinstance(Phi, torch.Tensor):
+            Phi = torch.tensor(Phi, dtype=torch.float)
+        activation = {}
+        def get_activation(name):
+            def hook(self, inputs, outputs):
+                activation[name] = outputs.detach()
+            return hook
 
-        # get test data
-        test_data = deepcopy(self.test_data)
-
-        # save noisy data and sigmas
-        data = (train_data, test_data)
-        self.train_sigma = train_sigma
-        self.test_sigma = test_sigma
-        print('train and test sigmas:', self.train_sigma, self.test_sigma)
-
-        print('performing parametric bootstrapping...')
-        theta_hats = parametric_bootstrap(
-                num_boots,
-                data,
-                self.fitter,
-                self.evaluater,
-                self.predicter,
-                test_sigma,
-                seed)
-        print('done')
-        self.parametric_boot_thetas = theta_hats
-
-    def plot_parametric_theta_boot(self, se='quantile', verbose=False):
-        plotter.theta_boot(
-                self.test_data,
-                self.parametric_boot_thetas,
-                [self.train_sigma, self.test_sigma],
-                se,
-                verbose)
-
-    ###############
-    # MP4 METHODS #
-    ###############
-
-    def save_theta_epochs_frame(self, frame_num):
-        theta_frame = self.theta_history.epochs[frame_num]
-        Phi, theta_Phi = deepcopy(self.test_data)
-
-        frame_path = 'visuals/theta_epochs/frames/'
-        frame_plot = lambda : plotter.theta_fit(Phi, 
-                                                theta_Phi, 
-                                                theta_frame, 
-                                                hold=True)
-
-        plotter.save_frame(frame_num, frame_path, frame_plot)
-
-    def save_theta_epochs_mp4(self):
-        # function that saves frame given fram_num
-        frame_saver = self.save_theta_epochs_frame
-        # settings dictionary
-        settings = dict()
-        settings['mp4_path'] = 'visuals/theta_epochs/learn_theta.mp4'
-        settings['frame_path'] = 'visuals/theta_epochs/frames/'
-        settings['num_frames'] = len(self.theta_history.epochs)
-        settings['duration'] = 3
-
-        plotter.save_mp4(frame_saver, settings)
-
-    def solution_fit_sample(self, sigma=0):
-        # get Phi, theta_Phi, theta
-        Phi, theta_Phi = deepcopy(self.test_data)
-        Phi, noise = tools.add_noise(Phi, sigma)
-        
-        num_plots = 9
-        # get sample
-        sample = np.random.randint(0, len(Phi)-1, num_plots)
-        Phi, noise = Phi[sample], noise[sample]
-        return Phi, noise, sample
-
-    def save_solution_epochs_frame(self, epoch, sigma=0):
-        num_eps = len(self.theta_history.epochs)
-        theta_Phi = deepcopy(self.test_data[1])
-        Phi, noise, sample = self.solution_fit_sample(sigma)
-        theta_Phi = theta_Phi[sample]
-        thetas = np.zeros((num_eps, len(sample), 3))
-        u_thetas = np.zeros((num_eps,) + Phi.shape)
-        for ep, theta in self.theta_history.epochs.items():
-            thetas[ep] = theta[sample]
-            u_thetas[ep] = self.u_from_theta(theta[sample])
-        u_frame = u_thetas[epoch]
-
-        # get common ylim over all epochs
-        y_min = np.amin([Phi, np.amin(u_thetas, axis=0)], axis=(2,0))
-        y_max = np.amax([Phi, np.amax(u_thetas, axis=0)], axis=(2,0))
-        ylims = np.vstack((y_min, y_max)).T
-        ylims *= 1.1
-
-        plotter.solution_fit(Phi, noise, theta_Phi, 
-                theta, 
-                u_frame, 
-                ylims=ylims,
-                verbose=False)
-        plotter.save_frame(epoch, 'visuals/solution_epochs/frames/')
-
-    def save_solution_epochs_mp4(self):
-        save_frame = self.save_solution_epochs_frame
-        # settings dictionary
-        settings = dict()
-        settings['mp4_path'] = 'visuals/solution_epochs/learn_solution.mp4'
-        settings['frame_path'] = 'visuals/solution_epochs/frames/'
-        settings['num_frames'] = len(self.theta_history.epochs)
-        settings['duration'] = 3
-
-        plotter.save_mp4(save_frame, settings)
-        
-    ################
-    # MISC METHODS #
-    ################
-
-    def theta_from_Phi(self, Phi):
-        """ Predict theta given Phi """
-        return self.get_theta(Phi).numpy()
-
-    def u_from_Phi(self, Phi):
-        """ Predicts u_theta given Phi """
-        return self.model.predict(Phi)
-
-    def u_from_theta(self, theta):
-        """ Reconstructs Phi given theta """
-        return self.get_solution(theta)
-
-    def noisify(self, data, sigma, seed=23):
-        """ Add noise to input of data """
-        x, y = deepcopy(data)
-        x, noise = tools.add_noise(x, sigma, seed)
-        data_with_noise = (x, y)
-        return data_with_noise
-
-    def mse_from_Phi(self, sigma=0):
-        """ Prints MSE from reconstructed Phi and latent theta """
-        # compute u mse
-        test_data = self.noisify(self.test_data, sigma)
-        u_theta = self.u_from_Phi(test_data[0])
-        u_mse = np.mean((u_theta - test_data[0]) ** 2)
-        print('Reconstructed Noisy Phi MSE:', u_mse)
-
-        # compute latent theta mse
-        theta = self.theta_from_Phi(test_data[0])
-        theta_mse = np.mean((test_data[1] - theta) ** 2, axis=0)
-        print('Noisy theta MSE:', theta_mse)
+        self.linear2.register_forward_hook(get_activation('linear2'))
+        out = self(Phi)
+        return activation['linear2']
 
 
-class LatentThetaHistory(tf.keras.callbacks.Callback):
-    """ Get latent theta from test set at each training batch """
-    def __init__(self, test_Phi):
-        self.test_Phi = test_Phi
-#        self.batches = dict()
-        self.epochs = dict()
+class ResetTape(pl.Callback):
+    """ Resets gradient tape for fenics adjoint to prevent memory leak """
+    def on_batch_end(self, trainer, pl_module):
+        tape = get_working_tape()
+        tape.__init__()
 
-    def set_model(self, model):
-        self.model = model
-        theta = self.model.get_layer(name='theta').output
-        self.get_theta = tf.keras.Model(self.model.input, theta)
 
-#    def on_train_batch_begin(self, batch, logs=None):
-#        theta = self.get_theta.predict(self.test_Phi)
-#        self.batches[batch] = theta
+def fit(train_data, valid_data, max_epochs=40):
+    """ Creates solver, model, trainer, data loader, then fits the model """
+    if not isinstance(train_data, torch.Tensor):
+        train_data = torch.tensor(train_data, dtype=torch.float)
+        train_data = TensorDataset(train_data)
+    if not isinstance(valid_data, torch.Tensor):
+        valid_data = torch.tensor(valid_data, dtype=torch.float)
+        valid_data = TensorDataset(valid_data)
 
-    def on_epoch_begin(self, epoch, logs=None):
-        theta = self.get_theta.predict(self.test_Phi)
-        self.epochs[epoch] = theta
+    solver = PoissonSolver()
+    model = PoissonModel(solver)
+
+    tb_logger = pl.loggers.TensorBoardLogger('lightning_logs/')
+    print(tb_logger.version)
+    checkpoint_filepath = 'lightning_logs/{epoch:02d}|{val_loss:.2e}'
+    checkpointer = ModelCheckpoint(filepath=checkpoint_filepath, verbose=True)
+    trainer = pl.Trainer(max_epochs=max_epochs, 
+                         callbacks=[ResetTape()],
+                         checkpoint_callback=checkpointer)
+                        # logger=tb_logger)
+
+    train_loader = DataLoader(train_data, batch_size=25, num_workers=8)
+    valid_loader = DataLoader(valid_data, batch_size=25, num_workers=8)
+    trainer.fit(model, train_loader, valid_loader)
+
+    # move checkpoint file
+    vnum = trainer.logger.version
+    model.logdir = f'lightning_logs/version_{vnum}/'
+    os.system('mv lightning_logs/*.ckpt ' + model.logdir)
+
+    return model
+
+def plot_loss(model, verbose=True):
+    train = [x.item() for x in model.train_history.values()]
+    valid = [x.item() for x in model.valid_history.values()]
+    epochs = [i for i in range(len(train))]
+
+    fig, ax = plt.subplots(figsize=(15,10))
+    ax.plot(epochs, train, label='training')
+    ax.plot(epochs, valid, label='validation')
+    ax.set_xlabel('epoch')
+    ax.set_ylabel('loss')
+    fig.legend()
+
+    logdir = model.logdir
+    filename = logdir + 'loss.png'
+    plt.savefig(filename)
+    if verbose:
+        plt.show()
+        plt.close()
+
+def predict_theta(model, Phi):
+    theta_hat = model.get_theta(Phi).detach().numpy()
+    return theta_hat
+
+def plot_theta(model, Phi, theta, verbose=True):
+    theta_hat = predict_theta(model, Phi)
+    fig, ax = plt.subplots(1,3, sharey=True, figsize=(20,10))
+    subplot_theta_fit(fig, ax, theta, theta=theta_hat)
+
+    # compute mse for titles
+    theta_mse = np.mean((theta_hat - theta)**2, axis=0)
+    for i in range(3):
+        ax[i].set_title(f'mse {theta_mse[i]:.1e}', loc='right', fontsize=25)
+
+    # save image
+    logdir = model.logdir
+    filename = logdir + 'theta.png'
+    plt.savefig(filename)
+    if verbose:
+        plt.show()
+        plt.close()
