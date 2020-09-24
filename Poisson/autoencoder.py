@@ -17,13 +17,13 @@ from fenics_adjoint import *
 
 
 class PoissonSolver:
-    """ Solves the 1D Poisson equation """
+    """ Solves the 1D Poisson equation. Should be torch agnostic """
 
     def __init__(self):
         # creates mesh, function space, and LHS weak form
         self.mesh = UnitIntervalMesh(99)
         self.V = FunctionSpace(self.mesh, 'P', 1)
-        self.dofs = self.V.dofmap().dofs(self.mesh, 0)
+        self.dofs = vertex_to_dof_map(self.V)
         u = TrialFunction(self.V)
         self.v = TestFunction(self.V)
         self.a = inner(grad(u), grad(self.v)) * dx
@@ -36,18 +36,14 @@ class PoissonSolver:
         L = c * self.v * dx
 
         # Define boundary condition
-        u_D = Expression('x[0] == 0 ? b0: b1',
-                        b0 = b0,
-                        b1 = b1,
-                        degree = 1)
-        bd_vals = Function(self.V)
-        bd_vals.assign(project(u_D, self.V))
-        bc = DirichletBC(self.V, bd_vals, 'on_boundary')
+        u_D = Expression('x[0] == 0 ? b0: b1', b0 = b0, b1 = b1, degree = 1)
+        u_D = project(u_D, self.V)
+        bc = DirichletBC(self.V, u_D, 'on_boundary')
 
         # Compute solution
         u = Function(self.V)
         solve(self.a == L, u, bc)
-        controls = [Control(c), Control(bd_vals)]
+        controls = [Control(c), Control(u_D)]
         return u, controls 
 
     def forward(self, theta_batch):
@@ -57,45 +53,40 @@ class PoissonSolver:
         self.controls = dict()
         self.solns = dict()
 
-        if isinstance(theta_batch, torch.Tensor):
-            theta_array = theta_batch.clone().numpy()
-
         if theta_batch.ndim == 1:
-            self.solns[0], self.controls[0] = self.solve(theta_array)
-            batch_solns[0] = self.solns[0].compute_vertex_values(self.mesh)
-        else:
-            batch_size = theta_array.shape[0]
+            theta_batch = np.expand_dims(theta_batch, axis=0)
+       #     self.solns[0], self.controls[0] = self.solve(theta_batch)
+       #     batch_solns[0] = self.solns[0].compute_vertex_values(self.mesh)
+        batch_size = theta_batch.shape[0]
             
-            # compute batch solutions
-            for idx, theta in enumerate(theta_array):
-                u, self.controls[idx] = self.solve(theta)
-                self.solns[idx] = u
-                batch_solns[idx] = u.compute_vertex_values(self.mesh)
+        # compute batch solutions
+        for idx in range(batch_size):
+            u, self.controls[idx] = self.solve(theta_batch[idx])
+            self.solns[idx] = u
+            batch_solns[idx] = u.compute_vertex_values(self.mesh)
 
         np_solns = np.array([u for u in batch_solns.values()])
-        return torch.tensor(np_solns, dtype=torch.float)
+        return np_solns
+
+    def solve_adjoint(self, out, data, controls):
+        # Compute L2 loss
+        Phi = Function(self.V)
+        Phi.vector().set_local(data[self.dofs])
+        J = assemble(0.5 * inner(out - Phi, out - Phi) * dx)
+
+        # compute loss gradient
+        dJdc, dJdb = compute_gradient(J, controls)
+        dJdc = dJdc.values().item()
+
+        # convert grads to scalars
+        dJdb = dJdb.compute_vertex_values(self.mesh)
+        grads = [dJdc, dJdb[0], dJdb[-1]]
+        return grads
 
     def backward(self, Phi_batch):
         """ Compute batch gradients dJ/dtheta """
 
-        def solve_adjoint(out, data, controls):
-            # Compute L2 loss
-            Phi = Function(self.V)
-            Phi.vector().set_local(data[self.dofs])
-            J = assemble(0.5 * inner(out - Phi, out - Phi) * dx)
-
-            # compute loss gradient
-            dJdc, dJdb = compute_gradient(J, controls)
-            dJdc = dJdc.values().item()
-
-            # convert grads to scalars
-            dJdb = dJdb.compute_vertex_values(self.mesh)
-            grads = [dJdc, dJdb[0], dJdb[-1]]
-            return grads
-
         grads = dict()
-        if isinstance(Phi_batch, torch.Tensor):
-            Phi_batch = Phi_batch.detach().numpy()
 
         if Phi_batch.ndim == 1:
             batch_size = 1
@@ -103,9 +94,9 @@ class PoissonSolver:
         else:
             batch_size = Phi_batch.shape[0]
         for idx in range(batch_size):
-            grads[idx] = solve_adjoint(self.solns[idx], 
-                                       Phi_batch[idx], 
-                                       self.controls[idx])
+            grads[idx] = self.solve_adjoint(self.solns[idx], 
+                                            Phi_batch[idx], 
+                                            self.controls[idx])
 
         grads = np.array([x for x in grads.values()])
         return grads
@@ -125,14 +116,15 @@ class TorchFenicsSolver(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, theta, Phi, solver):
-        out = solver.forward(theta)
         ctx.Phi = Phi
         ctx.solver = solver
-        return out
+        theta_array = theta.clone().numpy()
+        out = solver.forward(theta_array)
+        return torch.tensor(out, dtype=torch.float)
 
     @staticmethod
     def backward(ctx, dout):
-        Phi = ctx.Phi
+        Phi = ctx.Phi.detach().numpy()
         solver = ctx.solver
         dtheta = torch.tensor(solver.backward(Phi))
         return dtheta, None, None
