@@ -387,3 +387,41 @@ class Encoder:
             print('total rel_err shape', cum_rel_err.shape)
             print('max_err index', max_err)
             print('min_err index', min_err)
+
+
+
+if __name__ == '__main__':
+    import equation 
+    
+    eqn_name = 'poisson'
+
+    ## LOAD DATA
+    dataset = equation.Dataset(eqn_name)
+    dataset.load()
+    in_units = dataset.train[0].shape[1]
+    out_units = dataset.train[1].shape[1]
+
+
+    ## DEFINE MODEL PARAMETERS
+    design = {'flavor':'ff',
+              'unit_activations':[(in_units, 'tanh'),
+                                  (50, 'tanh'),
+                                  (out_units, 'linear')
+                                 ],
+              'dropout':[0.1, 0.],
+              'optimizer':'adam',
+              'loss':'mse',
+              'callbacks':['learning_rate', 'tensorboard'],
+              'batch_size':25,
+              'epochs':100,
+             }
+
+    set_seed(23)
+
+    # TRAIN MODEL
+    model = encoder.Encoder(design, dataset)
+    model.train()
+    model.predict_plot()
+
+    ## PRINT DIAGNOSTICS:
+    #model.print_errors(verbose=True)
