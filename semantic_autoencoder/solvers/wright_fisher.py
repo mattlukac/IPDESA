@@ -1,8 +1,16 @@
-from base import Solver
+from semantic_autoencoder.solvers.base import Solver
 import numpy as np
 from fenics import *
 from fenics_adjoint import *
 from collections import OrderedDict
+
+
+# TODO:
+#   issue: solve_adjoint is returning the same gradient
+#          for many observations, and sometimes returns 0
+#   solution: let solve() take Phi as argument,
+#             make J an attribute and integrate over time
+#             first suppose we have full temporal observations of Phi
 
 
 class WrightFisherOnePop(Solver):
@@ -16,19 +24,23 @@ class WrightFisherOnePop(Solver):
         self.v = TestFunction(V)
         a = self.u * self.v * dx
         super().__init__(mesh, V, a)
+        self.a_finalized = False
 
     def solve(self, theta):
         # set controls: eff pop size and selection coefficient
         N, gamma = theta
         N, gamma = Constant(N), Constant(gamma)
-        controls = [Control(N), Control(gamma)]
 
-        # add parameters to weak form LHS
+        # set up drift and selection terms
         xx = Expression('x[0] * (1 - x[0])', degree=1, domain=self.mesh)
         drift = xx / (4. * N) * self.u
         selection = gamma * xx * self.u
-        self.a += self.dt * inner(grad(drift), grad(self.v)) * dx 
-        self.a -= self.dt * selection * grad(self.v)[0] * dx 
+
+        # keep 'a' fixed after first call to solve()
+        if not self.a_finalized:
+            self.a += self.dt * inner(grad(drift), grad(self.v)) * dx 
+            self.a -= self.dt * selection * grad(self.v)[0] * dx 
+            self.a_finalized = True
 
         # Gaussian initial condition, frequencies centered at p
         u_0 = '100 * exp(-pow(100 * (x[0] - p), 2)) / sqrt(pi)'
@@ -40,25 +52,25 @@ class WrightFisherOnePop(Solver):
 
         # boundary conditions
         u = Function(self.V)
-        bc = DirichletBC(self.V, Constant(1.0), 'on_boundary')
+        bc = DirichletBC(self.V, Constant(0.5), 'on_boundary')
 
         # solve PDE
         delta_x = 1 / self.mesh.num_cells()
         t = float(self.dt)
-        u_t = OrderedDict()
-        u_t[t] = u_0.compute_vertex_values(self.mesh)
+        self.u_t = OrderedDict()
+        self.u_t[0] = u_0.compute_vertex_values(self.mesh)
 
         while t <= self.T:
             # solve for u and normalize solution
             solve(self.a == L, u, bc)
             u.vector()[:] /= np.sum(u.vector()[:] * delta_x)
+            self.u_t[t] = u.compute_vertex_values(self.mesh)
             
             # update u_0 and t
             u_0.assign(u)
-            u_t[t] = u_0.compute_vertex_values(self.mesh)
             t += float(self.dt)
 
-        self.u_t = u_t
+        controls = [Control(N), Control(gamma)]
         return u, controls
 
     def solve_adjoint(self, out, data, controls):
