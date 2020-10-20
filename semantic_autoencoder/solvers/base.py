@@ -8,11 +8,12 @@ from fenics_adjoint import *
 class Solver(ABC):
     """ base solver class inherited by all solvers """
 
-    def __init__(self, mesh, V, a):
+    def __init__(self, V, a):
         """ Creates mesh, function space V, and LHS of weak form a """
-        self.mesh = mesh
+        self.mesh = V.mesh()
         self.V = V
-        self.dofs = vertex_to_dof_map(V)
+        self.W = FunctionSpace(self.mesh, 'P', 1)
+        self.v2d = vertex_to_dof_map(self.W)
         self.a = a
 
     @abstractmethod
@@ -20,7 +21,11 @@ class Solver(ABC):
         """ Solve the PDE given parameters theta """
 
     def forward(self, theta_batch):
-        """ Computes batch solutions to the PDE """
+        """ 
+        Computes batch solutions to the PDE
+            arguments: theta batch array with shape (batch_size, theta_size)
+            returns: solns array with shape (batch_size, soln_dim)
+        """
         batch_solns = dict()
         self.controls = dict()
         self.solns = dict()
@@ -44,7 +49,11 @@ class Solver(ABC):
         """ Compute loss J and loss gradients dJ/dtheta """
 
     def backward(self, Phi_batch):
-        """ Compute batch gradients dJ/dtheta """
+        """ 
+        Compute batch gradients dJ/dtheta
+            argument: data batch array with shape (batch_size, soln_dim)
+            returns: loss grads dJ/dtheta with shape (batch_size, theta_size)
+        """
         
         grads = dict()
 
