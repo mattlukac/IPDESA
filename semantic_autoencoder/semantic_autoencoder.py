@@ -55,9 +55,9 @@ class SemanticAutoEncoder(pl.LightningModule):
         self.debug_mode = debug_mode
         super().__init__()
         self.solver = solver
-        self.linear1 = torch.nn.Linear(Phi_dim, 20)
-        self.nu_linear = torch.nn.Linear(20, 1)
-        self.gamma_linear = torch.nn.Linear(20, 1)
+        self.linear1 = torch.nn.Linear(Phi_dim, 50)
+        self.nu_linear = torch.nn.Linear(50, 1)
+        self.gamma_linear = torch.nn.Linear(50, 1)
         self.tanh = torch.nn.Tanh()
         self.sigmoid = torch.nn.Sigmoid()
         self.softplus = torch.nn.Softplus()
@@ -72,10 +72,12 @@ class SemanticAutoEncoder(pl.LightningModule):
         inputs = inputs[0] if isinstance(inputs, list) else inputs
         batch_size = len(inputs)
         x = self.linear1(inputs)
-        self.nu = torch.mul(self.sigmoid(self.nu_linear(x)), 1-0.001)
-        self.nu = torch.add(self.nu, 0.001)
+        self.nu = self.softplus(self.nu_linear(x))
+#        self.nu = torch.mul(self.sigmoid(self.nu_linear(x)), 1-0.001)
+#        self.nu = torch.add(self.nu, 0.001)
         self.gamma = self.tanh(self.gamma_linear(x))
         self.theta = torch.cat((self.nu, self.gamma), dim=1)
+
         if self.debug_mode: print('theta\n', self.theta)
         u = self.fenics_solver.apply(self.theta, inputs, self.solver)
         return u
@@ -88,7 +90,9 @@ class SemanticAutoEncoder(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         u = self(batch)
         Phi, = batch
-        loss = torch.nn.L1Loss()(u, Phi)
+        L1 = torch.nn.L1Loss()
+        L2 = torch.nn.MSELoss()
+        loss = L1(u, Phi) + L2(u, Phi)
         self.batch_loss = loss.detach().item()
         result = pl.TrainResult(minimize=loss)
         result.log('train_loss', loss)
@@ -128,11 +132,11 @@ class SemanticAutoEncoder(pl.LightningModule):
         out = self(Phi)
         return activation['linear2']
 
-    def get_progress_bar_dict(self):
-        """ This prints a more accurate loss in the progress bar """
-        tqdm_dict = super().get_progress_bar_dict()
-        tqdm_dict['loss'] = self.batch_loss
-        return tqdm_dict
+#    def get_progress_bar_dict(self):
+#        """ This prints a more accurate loss in the progress bar """
+#        tqdm_dict = super().get_progress_bar_dict()
+#        tqdm_dict['loss'] = self.batch_loss
+#        return tqdm_dict
 
 class ResetTape(pl.Callback):
     """ Resets gradient tape for fenics adjoint to prevent memory leak """

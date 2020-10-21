@@ -11,9 +11,13 @@ set_log_active(False)
 size = 2000
 
 # simulation parameters 
-nu_lo, nu_hi = 0.001, 1
+nu_lo, nu_hi = 1, 5000
 gamma_lo, gamma_hi = -1, 1
 nu = np.random.uniform(low=nu_lo, high=nu_hi, size=size)
+# invert nu
+lo, hi = 1 / nu_hi, 1 / nu_lo
+nu_lo, nu_hi = lo, hi
+nu = 1 / nu
 gamma = np.random.uniform(low=gamma_lo, high=gamma_hi, size=size)
 theta = np.stack((nu, gamma), axis=1)
 assert theta.shape == (size, 2)

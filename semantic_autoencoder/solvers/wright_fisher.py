@@ -28,9 +28,11 @@ class WrightFisherOnePop(Solver):
           gamma = 2Nref s   scaled (relative to Nref) selection coefficient
     """
 
-    def __init__(self, nx=99, T=3, dt=0.1, deg=1, debug_mode=False, grad_test=False):
+    def __init__(self, nx=99, T=2, dt=0.1, deg=1, loss='l2', debug_mode=False, grad_test=False, nu_inv=True):
+        self.loss = loss
         self.debug_mode = debug_mode
         self.grad_test = grad_test
+        self.nu_inv = nu_inv
         # discretize temporal domain
         self.dt = Constant(dt)   # time step
         self.T = float(T)        # terminal time
@@ -64,7 +66,10 @@ class WrightFisherOnePop(Solver):
 
         # variational forms
         a = u * v * dx
-        a += self.dt * inner(grad(xx * self.nu * u), grad(v)) * dx # drift
+        if nu_inv:
+            a += self.dt * inner(grad(xx * self.nu * u), grad(v)) * dx # drift
+        else:
+            a += self.dt * inner(grad(xx / self.nu * u), grad(v)) * dx # drift
         a -= self.dt * 2.0 * xx * self.gamma * u * grad(v)[0] * dx # selection
         self.L = self.u_n * v * dx
 
@@ -105,8 +110,10 @@ class WrightFisherOnePop(Solver):
         Phi = Function(self.V)
         Phi.vector().set_local(data)
         
-        #L2 = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
-        J = assemble(abs(u -  Phi) * dx)
+        if self.loss == 'l2':
+            J = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
+        elif self.loss == 'l1':
+            J = assemble(abs(u -  Phi) * dx)
         if self.debug_mode:
             print(f'J = {J}')
             # plot u and Phi
@@ -146,17 +153,18 @@ class WrightFisherOnePop(Solver):
         plt.show()
         plt.close()
 
-    def loss_contour(self, fig, ax, theta_true, loss='l2'):
+    def loss_contour(self, fig, ax, theta_true):
         """ Contour plot of loss around true theta """
         nu_true, gamma_true = theta_true
-       # nu_min, nu_max = nu_true - 399, nu_true + 999
-       # nu_min = max(nu_min, 99)
-        nu_min, nu_max = 0, 1
+        if not self.nu_inv:
+            nu_min, nu_max = nu_true/3, 3*nu_true
+        else:
+            nu_min, nu_max = 0, 3*nu_true
         gamma_min, gamma_max = min(gamma_true-1, -1), max(gamma_true+1, 1)
         
         # make contour plot
         ranges = (nu_min, nu_max, gamma_min, gamma_max)
-        self._get_tensors(theta_true, ranges, 15, loss)
+        self._get_tensors(theta_true, ranges, 15)
         lines = np.linspace(np.min(self.losses), np.max(self.losses), 20)
         cont = ax.contourf(self.nu_tensor, self.gamma_tensor, self.losses, lines)
         cbar = fig.colorbar(cont)
@@ -172,25 +180,18 @@ class WrightFisherOnePop(Solver):
         ax.set_ylabel(r'$\gamma$')
         return fig, ax
 
-    def _get_loss(self, theta_true, theta_hat, loss='l2'):
+    def _get_loss(self, theta_true, theta_hat):
         """ Compute mse loss between u_theta_hat and Phi = u_theta """
         Phi, _ = self.solve(theta_true)
         u, _ = self.solve(theta_hat)
         # l1 and l2 loss
-        assert loss in ['l1', 'l2', 'both', 'other']
-        if loss == 'l1':
+        if self.loss == 'l1':
             J = assemble(abs(u - Phi) * dx)
-        elif loss == 'l2':
+        elif self.loss == 'l2':
             J = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
-        elif loss == 'both':
-            J1 = assemble(abs(u - Phi) * dx)
-            J2 = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
-            J = J1 + 0.1 * J2
-        elif loss == 'other':
-            J = assemble(abs(u ** 2 - Phi ** 2) * dx)
         return J
 
-    def _get_tensors(self, theta_true, ranges, contour_res, loss='l2'):
+    def _get_tensors(self, theta_true, ranges, contour_res):
         """ Given ranges for nu and gamma and some resolution
         computes the loss tensor as a function of nu and gamma """
         # get ranges and make lattice
@@ -204,7 +205,7 @@ class WrightFisherOnePop(Solver):
         for idx, _ in np.ndenumerate(nu_tensor):
             nu = nu_tensor[idx]
             gamma = gamma_tensor[idx]
-            losses[idx] = self._get_loss(theta_true, [nu, gamma], loss)
+            losses[idx] = self._get_loss(theta_true, [nu, gamma])
 
         # save as attributes
         self.nu_tensor = nu_tensor
