@@ -12,9 +12,6 @@ import matplotlib.pyplot as plt
 #   solution: let solve() take Phi as argument,
 #             make J an attribute and integrate over time
 #             first suppose we have full temporal observations of Phi
-#   issue: experiencing too much error when data and solns
-#          are not in identical function spaces
-#   solution: always use P1??
 
 class WrightFisherOnePop(Solver):
     """ 
@@ -36,6 +33,7 @@ class WrightFisherOnePop(Solver):
         # discretize temporal domain
         self.dt = Constant(dt)   # time step
         self.T = float(T)        # terminal time
+        self.ts = self._time_steps() # time dict keys
 
         # discretize frequency domain
         mesh = UnitIntervalMesh(int(nx))
@@ -46,7 +44,7 @@ class WrightFisherOnePop(Solver):
 
         # initial condition: concentration c, initial freq p
         u_0 = 'c * exp(-pow(c * (x[0] - p), 2) / 2.) / sqrt(2. * pi)'
-        u_0 = Expression(u_0, c=100, p=0.5, degree=deg)
+        u_0 = Expression(u_0, c=100, p=0.5, degree=2)
         u_0 = project(u_0, V)
         normalise(u_0)
         self.u_0 = u_0
@@ -55,14 +53,17 @@ class WrightFisherOnePop(Solver):
         self.u_t = OrderedDict()
         self.u_t[0] = u_0.copy(deepcopy=True)
 
-        # relative eff pop size nu=N/Nref, gamma=2Nref s
-        self.nu, self.gamma = Constant(10.), Constant(0.)
-
+        # time-dependent controls: relative eff pop size nu=N/Nref, gamma=2Nref s
+        self.ctrls = OrderedDict()
+        for t in self.ts:
+            self.ctrls[t] = [Constant(10.), Constant(0.)]
+        self.nu, self.gamma = ctrls[dt]
+        
         # trial and test function, geometric term
         u = TrialFunction(V)
         v = TestFunction(V)
         self.u_n = Function(V)
-        xx = Expression('x[0] * (1 - x[0]) / 2.0', degree=2, domain=mesh)
+        xx = Expression('0.5 * x[0] * (1 - x[0])', degree=2, domain=mesh)
 
         # variational forms
         a = u * v * dx
@@ -91,19 +92,40 @@ class WrightFisherOnePop(Solver):
         # solution, boundary conds, solve
         u = Function(self.V)
         bc = DirichletBC(self.V, Constant(0.), 'on_boundary')
-        while t <= self.T:
+        for t in self.ts:
             # solve for density u and add to dict
             solve(self.a == self.L, u, bc)
             self.u_t[t] = u.copy(deepcopy=True)
             
-            # update initial condition u_0 and time t
+            # update initial condition and controls
             self.u_n.assign(u)
-            t += dt
-            t = round(t, digs)
+            self.nu.assign(ctrls[t][0])
+            self.gamma.assign(ctrls[t][1])
+            
+       # while t <= self.T:
+       #     # solve for density u and add to dict
+       #     solve(self.a == self.L, u, bc)
+       #     self.u_t[t] = u.copy(deepcopy=True)
+       #     
+       #     # update initial condition u_0 and time t
+       #     self.u_n.assign(u)
+       #     t += dt
+       #     t = round(t, digs)
 
         # time independent controls
         controls = [Control(self.nu), Control(self.gamma)]
         return u, controls
+
+    def _time_steps(self):
+        dt = float(self.dt) # initial timestep
+        digs = len(str(dt).split('.')[-1]) # number of sig digits
+        t = dt
+        ts = [t]
+        while t <= self.T:
+            t += dt 
+            t = round(t, digs)
+            ts.append(t)
+        return ts
 
     def solve_adjoint(self, u, data, controls):
         # data are assumed to be on vertices
