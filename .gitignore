@@ -17,6 +17,6 @@ data/*
 keynotes/
 fenics_tutorials/
 fenics_scripts/
-**/__pycache__
+**/__pycache__/
 Poisson/adjoint/
 Poisson/trashbin/
