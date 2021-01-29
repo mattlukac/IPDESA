@@ -25,11 +25,9 @@ class WrightFisherOnePop(Solver):
           gamma = 2Nref s   scaled (relative to Nref) selection coefficient
     """
 
-    def __init__(self, nx=99, T=2, dt=0.1, deg=1, loss='l2', debug_mode=False, grad_test=False, nu_inv=True):
-        self.loss = loss
+    def __init__(self, nx=99, T=2, dt=0.1, deg=1, debug_mode=False, grad_test=False):
         self.debug_mode = debug_mode
         self.grad_test = grad_test
-        self.nu_inv = nu_inv
         # discretize temporal domain
         self.dt = Constant(dt)   # time step
         self.T = float(T)        # terminal time
@@ -44,7 +42,7 @@ class WrightFisherOnePop(Solver):
 
         # initial condition: concentration c, initial freq p
         u_0 = 'c * exp(-pow(c * (x[0] - p), 2) / 2.) / sqrt(2. * pi)'
-        u_0 = Expression(u_0, c=100, p=0.5, degree=2)
+        u_0 = Expression(u_0, c=100, p=0.5, degree=deg)
         u_0 = project(u_0, V)
         normalise(u_0)
         self.u_0 = u_0
@@ -54,10 +52,10 @@ class WrightFisherOnePop(Solver):
         self.u_t[0] = u_0.copy(deepcopy=True)
 
         # time-dependent controls: relative eff pop size nu=N/Nref, gamma=2Nref s
-        self.ctrls = OrderedDict()
-        for t in self.ts:
-            self.ctrls[t] = [Constant(10.), Constant(0.)]
-        self.nu, self.gamma = ctrls[dt]
+       # self.ctrls = OrderedDict()
+       # for t in self.ts:
+       #     self.ctrls[t] = [Constant(10.), Constant(0.)]
+        self.nu, self.gamma = Constant(1.), Constant(0.)
         
         # trial and test function, geometric term
         u = TrialFunction(V)
@@ -66,11 +64,8 @@ class WrightFisherOnePop(Solver):
         xx = Expression('0.5 * x[0] * (1 - x[0])', degree=2, domain=mesh)
 
         # variational forms
-        a = u * v * dx
-        if nu_inv:
-            a += self.dt * inner(grad(xx * self.nu * u), grad(v)) * dx # drift
-        else:
-            a += self.dt * inner(grad(xx / self.nu * u), grad(v)) * dx # drift
+        a = u * v * dx # previous timestep soln
+        a += self.dt * inner(grad(xx / self.nu * u), grad(v)) * dx # drift
         a -= self.dt * 2.0 * xx * self.gamma * u * grad(v)[0] * dx # selection
         self.L = self.u_n * v * dx
 
@@ -85,9 +80,9 @@ class WrightFisherOnePop(Solver):
         self.gamma.assign(gamma)
 
         # time index
-        dt = float(self.dt) # time step
-        digs = len(str(dt).split('.')[-1]) # sig digs for u_t keys
-        t = dt
+       # dt = float(self.dt) # time step
+       # digs = len(str(dt).split('.')[-1]) # sig digs for u_t keys
+       # t = dt
 
         # solution, boundary conds, solve
         u = Function(self.V)
@@ -99,8 +94,8 @@ class WrightFisherOnePop(Solver):
             
             # update initial condition and controls
             self.u_n.assign(u)
-            self.nu.assign(ctrls[t][0])
-            self.gamma.assign(ctrls[t][1])
+       #     self.nu.assign(ctrls[t][0])
+       #     self.gamma.assign(ctrls[t][1])
             
        # while t <= self.T:
        #     # solve for density u and add to dict
@@ -132,10 +127,7 @@ class WrightFisherOnePop(Solver):
         Phi = Function(self.V)
         Phi.vector().set_local(data)
         
-        if self.loss == 'l2':
-            J = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
-        elif self.loss == 'l1':
-            J = assemble(abs(u -  Phi) * dx)
+        J = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
         if self.debug_mode:
             print(f'J = {J}')
             # plot u and Phi
@@ -178,10 +170,7 @@ class WrightFisherOnePop(Solver):
     def loss_contour(self, fig, ax, theta_true):
         """ Contour plot of loss around true theta """
         nu_true, gamma_true = theta_true
-        if not self.nu_inv:
-            nu_min, nu_max = nu_true/3, 3*nu_true
-        else:
-            nu_min, nu_max = 0, 3*nu_true
+        nu_min, nu_max = nu_true/3, 3*nu_true
         gamma_min, gamma_max = min(gamma_true-1, -1), max(gamma_true+1, 1)
         
         # make contour plot
@@ -193,7 +182,7 @@ class WrightFisherOnePop(Solver):
         cbar.set_label(r'loss $\mathcal{J}$', rotation=90)
 
         # make optimum point
-        ax.scatter(nu_true, gamma_true, c='r', s=10**2)
+        ax.scatter(nu_true, gamma_true, c='r', s=5**2)
 
         # other options
         ax.set_xlim([nu_min, nu_max])
@@ -206,11 +195,7 @@ class WrightFisherOnePop(Solver):
         """ Compute mse loss between u_theta_hat and Phi = u_theta """
         Phi, _ = self.solve(theta_true)
         u, _ = self.solve(theta_hat)
-        # l1 and l2 loss
-        if self.loss == 'l1':
-            J = assemble(abs(u - Phi) * dx)
-        elif self.loss == 'l2':
-            J = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
+        J = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
         return J
 
     def _get_tensors(self, theta_true, ranges, contour_res):

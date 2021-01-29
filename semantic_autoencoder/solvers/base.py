@@ -12,8 +12,7 @@ class Solver(ABC):
         """ Creates mesh, function space V, and LHS of weak form a """
         self.mesh = V.mesh()
         self.V = V
-        self.W = FunctionSpace(self.mesh, 'P', 1)
-        self.v2d = vertex_to_dof_map(self.W)
+        self.v2d = np.array(V.dofmap().dofs(self.mesh, 0))
         self.a = a
 
     @abstractmethod
@@ -46,7 +45,7 @@ class Solver(ABC):
 
     @abstractmethod
     def solve_adjoint(out, data, controls):
-        """ Compute loss J and loss gradients dJ/dtheta """
+        """ Compute loss J and loss gradients dJ/dtheta for a single theta """
 
     def backward(self, Phi_batch):
         """ 
@@ -57,11 +56,11 @@ class Solver(ABC):
         
         grads = dict()
 
-        # singleton batch case
+        # if singleton batch, reshape to (1, Phi.shape)
         if Phi_batch.ndim == 1:
             Phi_batch = np.expand_dims(Phi_batch, axis=0)
+        # solve adjoint batch
         batch_size = Phi_batch.shape[0]
-
         for idx in range(batch_size):
             grads[idx] = self.solve_adjoint(self.solns[idx], 
                                             Phi_batch[idx], 
