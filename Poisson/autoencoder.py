@@ -298,3 +298,28 @@ def plot_theta(model, Phi, theta, verbose=True):
     if verbose:
         plt.show()
         plt.close()
+
+def plot_theta_from_ckpt(vnum, Phi, theta, verbose=True):
+    from glob import glob
+    # load model
+    ckpt_name = glob(f'lightning_logs/version_{vnum}/*ckpt')[0]
+    model = PoissonModel.load_from_checkpoint(ckpt_name)
+    print(model)
+    # plot theta
+#    theta_hat = predict_theta(model, Phi)
+#    fig, ax = plt.subplots(1,3, sharey=True, figsize=(20,10))
+#    subplot_theta_fit(fig, ax, theta, theta=theta_hat)
+#
+#    # compute mse for titles
+#    theta_mse = np.mean((theta_hat - theta)**2, axis=0)
+#    for i in range(3):
+#        ax[i].set_title(f'mse {theta_mse[i]:.1e}', loc='right', fontsize=25)
+#
+#    # save image
+#    logdir = model.logdir
+#    filename = logdir + 'theta_zoom.png'
+#    plt.savefig(filename)
+#    if verbose:
+#        plt.show()
+#        plt.close()
+

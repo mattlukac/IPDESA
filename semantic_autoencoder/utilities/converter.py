@@ -4,8 +4,8 @@ import numpy as np
 import torch
 from fenics import *
 
-def numpy_to_torch(array):
-    return torch.tensor(array, dtype=torch.float)
+def numpy_to_torch(array, requires_grad=False):
+    return torch.tensor(array, dtype=torch.float, requires_grad=requires_grad)
 
 def torch_to_numpy(tensor):
     return tensor.detach().numpy()

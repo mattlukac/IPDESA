@@ -1,6 +1,7 @@
 """ Contains base Solver class for various PDE problems """
 from abc import ABC, abstractmethod
 import numpy as np
+import multiprocessing as mp
 from fenics import *
 from fenics_adjoint import *
 
@@ -19,7 +20,8 @@ class Solver(ABC):
     def solve(self, theta):
         """ Solve the PDE given parameters theta """
 
-    def forward(self, theta_batch):
+    # TODO use multiprocessor to paralellize
+    def forward(self, thetas):
         """ 
         Computes batch solutions to the PDE
             arguments: theta batch array with shape (batch_size, theta_size)
@@ -30,18 +32,19 @@ class Solver(ABC):
         self.solns = dict()
 
         # singleton batch case
-        if theta_batch.ndim == 1:
-            theta_batch = np.expand_dims(theta_batch, axis=0)
-        batch_size = theta_batch.shape[0]
+        if thetas.ndim == 1:
+            thetas = np.expand_dims(thetas, axis=0)
+        batch_size = thetas.shape[0]
 
-        # compute batch solutions
-        for idx in range(batch_size):
-            u, self.controls[idx] = self.solve(theta_batch[idx])
-            self.solns[idx] = u
-            batch_solns[idx] = u.compute_vertex_values(self.mesh)
+        # TODO parallelize this
+        solns = self.solve(thetas)
+    #    for idx in range(batch_size):
+    #        u, self.controls[idx] = self.solve(theta_batch[idx])
+    #        self.solns[idx] = u
+    #        batch_solns[idx] = u.compute_vertex_values(self.mesh)
 
-        solns_array = np.array([u for u in batch_solns.values()])
-        return solns_array
+    #    solns = np.array([u for u in batch_solns.values()])
+        return solns
 
     @abstractmethod
     def solve_adjoint(out, data, controls):

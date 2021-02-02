@@ -1,13 +1,17 @@
 from .base import Solver
 import numpy as np
+import multiprocessing as mp
 from fenics import *
 from fenics_adjoint import *
 
 
 class Poisson(Solver):
 
+    # TODO parallelize solving 
+    # perhaps have mesh(comm) as init argument
+    # and parallelize in base solver
     def __init__(self, nx):
-        mesh = UnitIntervalMesh(nx)
+        mesh = UnitIntervalMesh(MPI.comm_self, nx)
         V = FunctionSpace(mesh, 'P', 1)
         u = TrialFunction(V)
         self.v = TestFunction(V)
@@ -15,6 +19,9 @@ class Poisson(Solver):
         super().__init__(V, a)
 
     def solve(self, theta):
+        """ 
+        Returns list of tuples (u, controls)
+        """
         c, b0, b1 = theta
         c = Constant(c)
         L = c * self.v * dx
@@ -28,20 +35,24 @@ class Poisson(Solver):
         controls = [Control(c), Control(u_D)]
         return u, controls
 
-    def solve_adjoint(self, u, data, controls):
-        Phi_W = Function(self.W)
-        Phi_W.vector().set_local(data[self.v2d])
-        Phi_V = project(Phi_W, self.V)
+    def solve_adjoint(self, u_controls, data):
+        def per_u(u_controls):
+            Phi_W = Function(self.W)
+            Phi_W.vector().set_local(data[self.v2d])
+            Phi_V = project(Phi_W, self.V)
 
-        Phi = Function(self.V)
-        Phi.assign(Phi_V)
-        J = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
+            Phi = Function(self.V)
+            Phi.assign(Phi_V)
+            J = 0.5 * assemble(inner(u - Phi, u - Phi) * dx)
 
-        dJdc, dJdb = compute_gradient(J, controls)
-        dJdc = dJdc.values().item()
+            dJdc, dJdb = compute_gradient(J, controls)
+            dJdc = dJdc.values().item()
 
-        dJdb = fenics_to_numpy(dJdb)
-        grads = [dJdc, dJdb[0], dJdb[-1]]
+            dJdb = fenics_to_numpy(dJdb)
+            grads = [dJdc, dJdb[0], dJdb[-1]]
+            return grads
+        pool = mp.Pool()
+        grads = pool.map(per_u, data)
         return grads
 
 
